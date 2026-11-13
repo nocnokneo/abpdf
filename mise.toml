@@ -1,0 +1,42 @@
+[settings]
+lockfile = true
+
+[tools]
+# rustfmt and clippy are named because not every rustup profile has them.
+# rust-src is what rust-analyzer reads the standard library from.
+rust = { version = "1.99.1", components = "rustfmt,clippy,rust-src" }
+typst = "0.15.1"
+
+# The PDFium release whose API Cargo.toml selects with pdfium-render's
+# `pdfium_NNNN` feature.
+[tools."http:pdfium"]
+version = "8125"
+
+[tools."http:pdfium".platforms]
+linux-x64 = { url = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/{{ version }}/pdfium-linux-x64.tgz" }
+linux-arm64 = { url = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/{{ version }}/pdfium-linux-arm64.tgz" }
+macos-x64 = { url = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/{{ version }}/pdfium-mac-x64.tgz" }
+macos-arm64 = { url = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/{{ version }}/pdfium-mac-arm64.tgz" }
+windows-x64 = { url = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/{{ version }}/pdfium-win-x64.tgz" }
+
+[env]
+# abpdf loads the library this names. Without it, it looks next to its own
+# executable and then where the system's loader looks.
+ABPDF_PDFIUM_LIBRARY = { value = "{{ tools.pdfium.path }}/{% if os() == 'windows' %}bin/pdfium.dll{% elif os() == 'macos' %}lib/libpdfium.dylib{% else %}lib/libpdfium.so{% endif %}", tools = true }
+# The fonts built into Typst are the same everywhere; installed ones are not.
+TYPST_IGNORE_SYSTEM_FONTS = "true"
+
+[tasks.check]
+description = "Everything that CI checks"
+run = [
+  "cargo fmt --check",
+  "cargo clippy --all-targets -- --deny warnings",
+  "cargo test",
+]
+
+[tasks.corpus]
+description = "Rebuild the test PDFs that are checked in from their Typst sources"
+run = [
+  "typst compile tests/corpus/reading.typ tests/corpus/reading-tagged.pdf",
+  "typst compile --no-pdf-tags tests/corpus/reading.typ tests/corpus/reading-untagged.pdf",
+]
