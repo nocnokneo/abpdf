@@ -12,7 +12,7 @@ use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfkc_quick};
 
 use crate::filter::Filters;
 use crate::geometry::{Rect, Size};
-use crate::reader::{ReadError, Reader, Style};
+use crate::reader::{ReadError, Reader};
 
 pub use self::builder::FlowBuilder;
 use self::join::Vocabulary;
@@ -39,10 +39,6 @@ pub fn prepare<const N: usize>(mut flows: [Flow; N], filters: &Filters) -> [Flow
 #[derive(Clone, Debug, PartialEq)]
 pub struct Flow {
     pub tokens: Vec<Token>,
-    /// The styles that [`Token::style`] refers to.
-    pub styles: Vec<Style>,
-    /// The structure paths that [`Token::structure_path`] refers to.
-    pub structure_paths: Vec<String>,
     pub page_sizes: Vec<Size>,
 }
 
@@ -69,12 +65,8 @@ pub struct Token {
     pub fragments: Vec<Fragment>,
     /// The white space before the token.
     pub gap: Gap,
-    /// Index into [`Flow::styles`], of the token's first character.
-    pub style: usize,
     /// Whether the producer marked the token as an artifact.
     pub is_artifact: bool,
-    /// Index into [`Flow::structure_paths`].
-    pub structure_path: Option<usize>,
     /// Why the token is left out of the comparison, if it is.
     /// [`prepare`] decides.
     pub exclusion: Option<Exclusion>,

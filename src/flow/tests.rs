@@ -87,37 +87,6 @@ fn soft_hyphen_inside_a_line_is_not_text() {
 }
 
 #[test]
-fn equal_styles_are_shared() {
-    let page = PageBuilder::new()
-        .text("plain ")
-        .span(|span| span.style.is_italic = true)
-        .text("slanted ")
-        .body()
-        .text("plain");
-    let flow = flow_of([page]);
-    assert_eq!(flow.styles.len(), 2);
-    assert_eq!(flow.tokens[0].style, flow.tokens[2].style);
-    assert!(flow.styles[flow.tokens[1].style].is_italic);
-}
-
-#[test]
-fn structure_path_is_kept_per_token() {
-    let page = PageBuilder::new()
-        .span(|span| span.structure_path = Some("Document/H1".to_owned()))
-        .text("Title\n")
-        .body()
-        .text("text");
-    let flow = flow_of([page]);
-    let path_of = |token: &Token| {
-        token
-            .structure_path
-            .map(|index| &*flow.structure_paths[index])
-    };
-    assert_eq!(path_of(&flow.tokens[0]), Some("Document/H1"));
-    assert_eq!(path_of(&flow.tokens[1]), None);
-}
-
-#[test]
 fn key_folds_compatibility_characters() {
     let flow = flow_of([PageBuilder::new().text("o\u{FB03}ce office")]);
     assert_eq!(flow.tokens[0].text, "o\u{FB03}ce");

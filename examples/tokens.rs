@@ -22,18 +22,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             Gap::Space => "_",
             Gap::LineBreak => "/",
         };
-        let style = &flow.styles[token.style];
         println!(
-            "{}:{}\t{gap}\t{}\t{}\t{}\t{} {}",
+            "{}:{}\t{gap}\t{}\t{}",
             first.page_index + 1,
             first.line_index + 1,
             token.text,
             if token.is_artifact { "artifact" } else { "" },
-            token
-                .structure_path
-                .map_or("", |index| &flow.structure_paths[index]),
-            style.font_name,
-            style.font_size,
         );
     }
     Ok(())

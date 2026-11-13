@@ -1,6 +1,5 @@
 //! Splitting the text of pages into tokens.
 
-use std::collections::HashMap;
 use std::mem;
 
 use unicode_segmentation::UnicodeSegmentation;
@@ -8,7 +7,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use super::hyphen_marks::{self, HyphenMarks};
 use super::{Flow, Fragment, Gap, HyphenKind, LineEndHyphen, Token};
 use crate::geometry::{Rect, Size};
-use crate::reader::{Char, Color, Page, Style, TextItem};
+use crate::reader::{Char, Page, TextItem};
 
 const SOFT_HYPHEN: char = '\u{AD}';
 
@@ -20,8 +19,6 @@ const INVISIBLE_CHARACTERS: [char; 3] = ['\u{200B}', '\u{2060}', '\u{FEFF}'];
 #[derive(Default)]
 pub struct FlowBuilder {
     tokens: Vec<Token>,
-    styles: StyleTable,
-    structure_paths: StructurePathTable,
     page_sizes: Vec<Size>,
     hyphen_marks: HyphenMarks,
 }
@@ -39,7 +36,6 @@ impl FlowBuilder {
             gap: Gap::LineBreak,
             run: Vec::new(),
             trailing_soft_hyphen: None,
-            span_properties: vec![None; page.spans.len()],
         }
         .tokenize();
     }
@@ -48,8 +44,6 @@ impl FlowBuilder {
         self.hyphen_marks.resolve_unmarked(&mut self.tokens);
         Flow {
             tokens: self.tokens,
-            styles: self.styles.styles,
-            structure_paths: self.structure_paths.paths,
             page_sizes: self.page_sizes,
         }
     }
@@ -60,12 +54,6 @@ struct RunEndHyphen {
     character: Char,
     /// `None` if the producer did not mark the hyphen.
     marked_kind: Option<HyphenKind>,
-}
-
-#[derive(Clone, Copy)]
-struct SpanProperties {
-    style: usize,
-    structure_path: Option<usize>,
 }
 
 struct PageTokenizer<'a> {
@@ -79,8 +67,6 @@ struct PageTokenizer<'a> {
     run: Vec<Char>,
     /// A soft hyphen after `run`, which is only shown if the line ends there.
     trailing_soft_hyphen: Option<Char>,
-    /// The interned properties of each of the page's spans, once looked up.
-    span_properties: Vec<Option<SpanProperties>>,
 }
 
 impl PageTokenizer<'_> {
@@ -162,7 +148,6 @@ impl PageTokenizer<'_> {
 
     fn push_token(&mut self, text: &str, characters: &[Char]) {
         let first = &characters[0];
-        let properties = self.span_properties(first.span);
         let bounds = characters
             .iter()
             .map(|character| character.bounds)
@@ -172,9 +157,7 @@ impl PageTokenizer<'_> {
             text: text.to_owned(),
             fragments: vec![self.fragment(bounds)],
             gap: mem::replace(&mut self.gap, Gap::None),
-            style: properties.style,
             is_artifact: self.page.spans[first.span].is_artifact,
-            structure_path: properties.structure_path,
             exclusion: None,
             line_end_hyphen: None,
         });
@@ -199,74 +182,5 @@ impl PageTokenizer<'_> {
             line_index: self.line_index,
             bounds,
         }
-    }
-
-    fn span_properties(&mut self, span_index: usize) -> SpanProperties {
-        if let Some(properties) = self.span_properties[span_index] {
-            return properties;
-        }
-        let span = &self.page.spans[span_index];
-        let properties = SpanProperties {
-            style: self.builder.styles.intern(&span.style),
-            structure_path: span
-                .structure_path
-                .as_deref()
-                .map(|path| self.builder.structure_paths.intern(path)),
-        };
-        self.span_properties[span_index] = Some(properties);
-        properties
-    }
-}
-
-#[derive(Default)]
-struct StyleTable {
-    styles: Vec<Style>,
-    index_by_key: HashMap<StyleKey, usize>,
-}
-
-/// The fields of a [`Style`], with floats as their bits so that they can be hashed.
-type StyleKey = (String, u32, Option<u16>, bool, Color, u32);
-
-impl StyleTable {
-    fn intern(&mut self, style: &Style) -> usize {
-        // Naming every field keeps the key in step with `Style`.
-        let Style {
-            font_name,
-            font_size,
-            font_weight,
-            is_italic,
-            fill_color,
-            rotation_degrees,
-        } = style;
-        let key = (
-            font_name.clone(),
-            font_size.to_bits(),
-            *font_weight,
-            *is_italic,
-            *fill_color,
-            rotation_degrees.to_bits(),
-        );
-        *self.index_by_key.entry(key).or_insert_with(|| {
-            self.styles.push(style.clone());
-            self.styles.len() - 1
-        })
-    }
-}
-
-#[derive(Default)]
-struct StructurePathTable {
-    paths: Vec<String>,
-    index_by_path: HashMap<String, usize>,
-}
-
-impl StructurePathTable {
-    fn intern(&mut self, path: &str) -> usize {
-        if let Some(&index) = self.index_by_path.get(path) {
-            return index;
-        }
-        self.paths.push(path.to_owned());
-        self.index_by_path
-            .insert(path.to_owned(), self.paths.len() - 1);
-        self.paths.len() - 1
     }
 }

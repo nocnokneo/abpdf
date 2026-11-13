@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use abpdf::flow::{Flow, Token};
 use abpdf::reader::pdfium::PdfiumReader;
-use abpdf::reader::{Color, ReadError, Reader};
+use abpdf::reader::{Color, Page, ReadError, Reader, Span, TextItem};
 
 use common::{corpus, flow_of, texts, token};
 
@@ -24,6 +24,37 @@ fn on_page(flow: &Flow, page_index: usize) -> impl Iterator<Item = &Token> {
     flow.tokens
         .iter()
         .filter(move |token| token.fragments[0].page_index == page_index)
+}
+
+/// The pages of a PDF of the corpus as the reader reports them.
+fn pages_of(file_name: &str) -> Vec<Page> {
+    let reader = PdfiumReader::open(corpus(file_name)).expect("the PDF opens");
+    (0..reader.page_count())
+        .map(|page_index| reader.read_page(page_index).expect("the page reads"))
+        .collect()
+}
+
+/// The span of the character with which a page first reads `text`.
+fn span_of<'a>(pages: &'a [Page], text: &str) -> &'a Span {
+    let span_on = |page: &'a Page| {
+        let page_text: String = page
+            .text
+            .iter()
+            .map(|item| match item {
+                TextItem::Char(character) => character.text,
+                TextItem::Space | TextItem::LineBreak => ' ',
+            })
+            .collect();
+        let item_index = page_text[..page_text.find(text)?].chars().count();
+        match &page.text[item_index] {
+            TextItem::Char(character) => Some(&page.spans[character.span]),
+            TextItem::Space | TextItem::LineBreak => None,
+        }
+    };
+    pages
+        .iter()
+        .find_map(span_on)
+        .unwrap_or_else(|| panic!("no page reads {text:?}"))
 }
 
 /// Whether `sequence` occurs in `texts` without gaps.
@@ -189,32 +220,26 @@ fn ligatures_read_as_their_letters() {
 }
 
 #[test]
-fn structure_path_names_the_elements_around_a_token() {
-    let flow = tagged();
-    let path_of = |text| {
-        let index = token(&flow, text).structure_path.expect("a structure path");
-        flow.structure_paths[index].as_str()
-    };
-    assert_eq!(path_of("Contents"), "Document/H1");
-    assert_eq!(path_of("quotes"), "Document/P");
-    assert_eq!(path_of("Row"), "Document/Table/TBody/TR/TD");
-    assert_eq!(path_of("Key"), "Document/Table/THead/TR/TH");
-    assert_eq!(path_of("label"), "Document/Div/Caption/Span");
+fn structure_path_names_the_elements_around_a_run() {
+    let pages = pages_of("reading-tagged.pdf");
+    let path_of = |text| span_of(&pages, text).structure_path.as_deref();
+    assert_eq!(path_of("Contents"), Some("Document/H1"));
+    assert_eq!(path_of("quotes"), Some("Document/P"));
+    assert_eq!(path_of("Row"), Some("Document/Table/TBody/TR/TD"));
+    assert_eq!(path_of("Key"), Some("Document/Table/THead/TR/TH"));
+    assert_eq!(path_of("label"), Some("Document/Div/Caption/Span"));
 
-    assert!(
-        untagged()
-            .tokens
-            .iter()
-            .all(|token| token.structure_path.is_none())
-    );
+    let untagged = pages_of("reading-untagged.pdf");
+    let mut spans = untagged.iter().flat_map(|page| &page.spans);
+    assert!(spans.all(|span| span.structure_path.is_none()));
 }
 
 #[test]
 fn style_is_read() {
-    let flow = untagged();
-    let style_of = |text| &flow.styles[token(&flow, text).style];
+    let pages = pages_of("reading-untagged.pdf");
+    let style_of = |text| &span_of(&pages, text).style;
 
-    let plain = style_of("and");
+    let plain = style_of("dashes");
     assert_eq!(plain.font_name, "LibertinusSerif-Regular");
     assert_eq!(plain.font_size, 10.0);
     assert!(!plain.is_italic);
