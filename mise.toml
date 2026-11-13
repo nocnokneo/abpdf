@@ -40,3 +40,10 @@ run = [
   "typst compile tests/corpus/reading.typ tests/corpus/reading-tagged.pdf",
   "typst compile --no-pdf-tags tests/corpus/reading.typ tests/corpus/reading-untagged.pdf",
 ]
+
+[tasks.manual]
+description = "Build both revisions of the synthetic manual, a few hundred pages each, into target/corpus"
+run = [
+  "typst compile --input revision=old tests/corpus/manual.typ target/corpus/manual-old.pdf",
+  "typst compile --input revision=new tests/corpus/manual.typ target/corpus/manual-new.pdf",
+]
