@@ -8,7 +8,7 @@ use std::ops::Range;
 use crate::Side;
 use crate::diff::{self, Hunk};
 use crate::filter::Filters;
-use crate::flow::{Flow, Gap, Token, Vocabulary};
+use crate::flow::{self, Flow, Gap, Token};
 use crate::geometry::Rect;
 use crate::reader::{ReadError, Reader};
 
@@ -63,13 +63,8 @@ impl Comparison {
     }
 
     /// Compares two flows as [`Flow::read`] returns them.
-    pub fn of_flows(mut old: Flow, mut new: Flow, filters: &Filters) -> Self {
-        filters.apply(&mut old);
-        filters.apply(&mut new);
-        let vocabulary = Vocabulary::of([&old, &new]);
-        old.join_broken_words(&vocabulary);
-        new.join_broken_words(&vocabulary);
-
+    pub fn of_flows(old: Flow, new: Flow, filters: &Filters) -> Self {
+        let [old, new] = flow::prepare([old, new], filters);
         let (old_compared, new_compared) = (Compared::of(&old), Compared::of(&new));
         let hunks = diff::diff(&old_compared.keys(), &new_compared.keys());
         let changes = hunks

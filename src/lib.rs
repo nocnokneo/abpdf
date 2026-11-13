@@ -4,7 +4,8 @@
 //!
 //! 1. A [`reader`] reports the text of each page.
 //! 2. A [`flow`] is that text as one sequence of tokens across pages.
-//! 3. A [`filter`] leaves page furniture out of the comparison.
+//! 3. [`flow::prepare`] leaves page furniture out of the comparison, as a
+//!    [`filter`] says, and rejoins the words that a line break splits.
 //! 4. A [`diff`] finds where the tokens of the two documents differ.
 //! 5. A [`change::Comparison`] says what each difference is and where.
 //!

@@ -7,16 +7,13 @@ use std::sync::Arc;
 use std::{env, fs};
 
 use abpdf::filter::Filters;
-use abpdf::flow::{Flow, Gap, Vocabulary};
+use abpdf::flow::{self, Flow, Gap};
 use abpdf::reader::pdfium::PdfiumReader;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let path = env::args().nth(1).ok_or("usage: tokens DOCUMENT.pdf")?;
     let reader = PdfiumReader::open(Arc::new(fs::read(path)?))?;
-    let mut flow = Flow::read(&reader)?;
-    Filters::default().apply(&mut flow);
-    let vocabulary = Vocabulary::of([&flow]);
-    flow.join_broken_words(&vocabulary);
+    let [flow] = flow::prepare([Flow::read(&reader)?], &Filters::default());
 
     for token in &flow.tokens {
         let first = token.fragments[0];
