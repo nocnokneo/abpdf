@@ -6,7 +6,6 @@ use super::{Connector, Mark, MarkStyle, Redline, Rgb, Sheet, SheetPage, Span, Su
 use super::{SummaryEntry, Target};
 use crate::Side;
 use crate::change::{Change, Comparison};
-use crate::listing;
 
 impl Redline {
     /// The redline of a comparison: a summary, and a sheet for every pair of
@@ -27,7 +26,7 @@ impl Redline {
             .changes
             .iter()
             .map(|change| SummaryEntry {
-                location: listing::pages_of(change),
+                location: change.location(),
                 old_text: change.old.text.clone(),
                 new_text: change.new.text.clone(),
                 target: target_of(change, &page_pairs),

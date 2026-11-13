@@ -82,6 +82,17 @@ impl Change {
             Side::New => &self.new,
         }
     }
+
+    /// The pages on which the two sides start, in words and as a reader
+    /// counts them.
+    pub fn location(&self) -> String {
+        let first_page_number = |side: &ChangeSide| side.areas[0].page_index + 1;
+        format!(
+            "old p. {} / new p. {}",
+            first_page_number(&self.old),
+            first_page_number(&self.new)
+        )
+    }
 }
 
 impl ChangeSide {

@@ -8,8 +8,8 @@ use krilla::surface::Surface;
 
 use super::text::TextFont;
 use super::{Rgb, Summary, SummaryEntry};
+use crate::excerpt::shortened;
 use crate::geometry::Size;
-use crate::listing::shortened;
 
 /// The page size of a summary without sheets to take it from: A4 on its side.
 const DEFAULT_PAGE_SIZE: Size = Size {

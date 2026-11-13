@@ -14,6 +14,7 @@
 
 pub mod change;
 pub mod diff;
+mod excerpt;
 pub mod filter;
 pub mod flow;
 pub mod geometry;
