@@ -2,7 +2,7 @@
 
 use super::{Connector, Mark, MarkStyle, Redline, Rgb, Sheet, SheetPage, Span, Summary};
 use super::{SummaryEntry, Target};
-use crate::change::{Change, ChangeSide, Comparison};
+use crate::change::{Area, Change, ChangeSide, Comparison};
 use crate::{BySide, Side};
 
 impl Redline {
@@ -21,7 +21,10 @@ impl Redline {
             .iter()
             .map(|change| SummaryEntry {
                 location: change.location(),
-                texts: change.sides.as_ref().map(|side| side.text.clone()),
+                texts: change
+                    .sides
+                    .as_ref()
+                    .map(|side| side.text().map(str::to_owned)),
                 target: target_of(change, &page_pairs),
             })
             .collect();
@@ -36,10 +39,11 @@ impl Redline {
 }
 
 /// The indices of the pages that a sheet shows.
-type PagePair = BySide<usize>;
+/// A side has none if the changes on the sheet are nowhere in its document.
+type PagePair = BySide<Option<usize>>;
 
 /// What sheets are sorted by: they are in the order of the new document.
-fn sheet_order(pair: &PagePair) -> (usize, usize) {
+fn sheet_order(pair: &PagePair) -> (Option<usize>, Option<usize>) {
     (pair.new, pair.old)
 }
 
@@ -59,11 +63,8 @@ impl Planner<'_> {
         for change in &self.comparison.changes {
             let pages = change.sides.as_ref().map(ChangeSide::page_indices);
             for position in 0..pages.old.len().max(pages.new.len()) {
-                pairs.push(
-                    pages
-                        .as_ref()
-                        .map(|pages| pages[position.min(pages.len() - 1)]),
-                );
+                let page_at = |pages: &Vec<usize>| pages.get(position).or(pages.last()).copied();
+                pairs.push(pages.as_ref().map(page_at));
             }
         }
         pairs.sort_by_key(sheet_order);
@@ -78,7 +79,7 @@ impl Planner<'_> {
             .iter()
             .enumerate()
             .filter_map(|(index, change)| {
-                let span = |side| span_on(change, side, pair[side]);
+                let span = |side: Side| span_on(&change.sides[side], pair[side]?);
                 Some(Connector {
                     label: (index + 1).to_string(),
                     spans: BySide {
@@ -89,7 +90,7 @@ impl Planner<'_> {
             })
             .collect();
         Sheet {
-            pages: BySide::from_fn(|side| self.sheet_page(side, pair[side])),
+            pages: BySide::from_fn(|side| Some(self.sheet_page(side, pair[side]?))),
             connectors,
             note_above: None,
             note_below: None,
@@ -97,51 +98,43 @@ impl Planner<'_> {
     }
 
     /// The page with a mark for every area that a change has on it.
-    /// `None` if the document has no such page, which is the case for the
-    /// page that a change is located on in a document without pages.
-    fn sheet_page(&self, side: Side, page_index: usize) -> Option<SheetPage> {
+    fn sheet_page(&self, side: Side, page_index: usize) -> SheetPage {
         let name = self.names[side];
         let page_count = self.comparison.flows[side].page_sizes.len();
-        if page_index >= page_count {
-            return None;
-        }
         let mut marks = Vec::new();
         for change in &self.comparison.changes {
-            let has_text = !change.sides[side].text.is_empty();
-            let areas = change.sides[side].areas.iter();
-            marks.extend(
-                areas
-                    .filter(|area| area.page_index == page_index)
-                    .map(|area| Mark {
-                        bounds: area.bounds,
-                        color: color_of(change, side),
-                        style: if has_text {
-                            MarkStyle::Highlight
-                        } else {
-                            MarkStyle::Caret
-                        },
-                    }),
-            );
+            let change_side = &change.sides[side];
+            let (color, style) = look_of(change_side, side);
+            let on_page = |area: &&Area| area.page_index == page_index;
+            let to_mark = |area: &Area| Mark {
+                bounds: area.bounds,
+                color,
+                style,
+            };
+            marks.extend(change_side.areas().iter().filter(on_page).map(to_mark));
         }
-        Some(SheetPage {
+        SheetPage {
             page_index,
             label: format!("{name} — page {} of {page_count}", page_index + 1),
             marks,
-        })
+        }
     }
 
-    /// Says on the sheets which pages of the new document come between them,
-    /// and so have no changes.
+    /// Says on the sheets which pages of the new document come between the
+    /// ones that they show, and so have no changes.
+    /// Sheets that show no new page say nothing about the others.
     fn note_unchanged_pages(&self, sheets: &mut [Sheet]) {
         let mut next_page_index = 0;
+        let mut last_with_new_page = None;
         for sheet in sheets.iter_mut() {
-            let Some(page) = &sheet.pages.new else {
+            let Some(page_index) = sheet.pages.new.as_ref().map(|page| page.page_index) else {
                 continue;
             };
-            sheet.note_above = self.unchanged_note(next_page_index, page.page_index);
-            next_page_index = page.page_index + 1;
+            sheet.note_above = self.unchanged_note(next_page_index, page_index);
+            next_page_index = page_index + 1;
+            last_with_new_page = Some(sheet);
         }
-        if let Some(last) = sheets.last_mut() {
+        if let Some(last) = last_with_new_page {
             let page_count = self.comparison.flows.new.page_sizes.len();
             last.note_below = self.unchanged_note(next_page_index, page_count);
         }
@@ -160,22 +153,27 @@ impl Planner<'_> {
     }
 }
 
-/// The side of a change that has no text is marked in the color of the other.
-fn color_of(change: &Change, side: Side) -> Rgb {
-    let side_with_text = match side {
-        Side::Old if change.sides.old.text.is_empty() => Side::New,
-        Side::New if change.sides.new.text.is_empty() => Side::Old,
-        side => side,
-    };
-    match side_with_text {
+/// How one side of a change is marked: its text is highlighted in the color
+/// of that side, and the place where it has none gets a caret in the color
+/// of the other.
+fn look_of(change_side: &ChangeSide, side: Side) -> (Rgb, MarkStyle) {
+    match change_side {
+        ChangeSide::Text { .. } => (color_of(side), MarkStyle::Highlight),
+        ChangeSide::Absent { .. } => (color_of(side.other()), MarkStyle::Caret),
+    }
+}
+
+/// The color of text that only this side has.
+fn color_of(side: Side) -> Rgb {
+    match side {
         Side::Old => Rgb::REMOVED,
         Side::New => Rgb::ADDED,
     }
 }
 
-/// The extent of what a change has on a page of one side, if anything.
-fn span_on(change: &Change, side: Side, page_index: usize) -> Option<Span> {
-    let areas = change.sides[side].areas.iter();
+/// The extent of what one side of a change has on a page, if anything.
+fn span_on(change_side: &ChangeSide, page_index: usize) -> Option<Span> {
+    let areas = change_side.areas().iter();
     areas
         .filter(|area| area.page_index == page_index)
         .map(|area| Span {
@@ -189,17 +187,18 @@ fn span_on(change: &Change, side: Side, page_index: usize) -> Option<Span> {
 }
 
 /// Where to look for a change: on the sheet of the pages it starts on, which
-/// is the first sheet that shows both of its sides.
+/// is the first sheet that shows all of it that can be shown, at its new
+/// side or else at its old one.
 fn target_of(change: &Change, page_pairs: &[PagePair]) -> Target {
-    let first_pages = change.sides.as_ref().map(|side| side.areas[0].page_index);
+    let first_pages = change.sides.as_ref().map(ChangeSide::first_page_index);
     let sheet_index = page_pairs
         .binary_search_by_key(&sheet_order(&first_pages), sheet_order)
         .expect("every change has a sheet for its first pages");
-    let span = span_on(change, Side::New, first_pages.new)
-        .expect("a change has an area on its first page");
+    let top_on = |side: Side| Some(span_on(&change.sides[side], first_pages[side]?)?.top);
+    let top = top_on(Side::New).or_else(|| top_on(Side::Old));
     Target {
         sheet_index,
-        top: span.top,
+        top: top.expect("a change has text on a page"),
     }
 }
 
@@ -405,8 +404,8 @@ mod tests {
             [SummaryEntry {
                 location: "old p. 2 / new p. 2".to_owned(),
                 texts: BySide {
-                    old: "old".to_owned(),
-                    new: "new".to_owned(),
+                    old: Some("old".to_owned()),
+                    new: Some("new".to_owned()),
                 },
                 target: Target {
                     sheet_index: 0,
@@ -426,6 +425,42 @@ mod tests {
             [(Some(1), Some(0)), (Some(2), Some(0))]
         );
         assert_eq!(entries(&redline)[0].target.sheet_index, 0);
+    }
+
+    #[test]
+    fn document_without_text_has_no_page_on_the_sheets() {
+        let no_pages: [&str; 0] = [];
+        let redline = redline(&no_pages, &["\nall new"]);
+        assert_eq!(shown_pages(&redline), [(None, Some(0))]);
+        assert_eq!(redline.sheets[0].connectors, []);
+
+        let [entry] = entries(&redline) else {
+            panic!("{:?}", entries(&redline));
+        };
+        assert_eq!(entry.location, "new p. 1");
+        assert_eq!(entry.texts.old, None);
+        assert_eq!(entry.target.top, LINE_PITCH);
+    }
+
+    #[test]
+    fn summary_entry_links_to_the_old_side_of_a_change_that_is_nowhere_in_the_new_document() {
+        // The new document has a page, but no text for a place to be next to.
+        let redline = redline(&["\nall old", "more old"], &[""]);
+        assert_eq!(shown_pages(&redline), [(Some(0), None), (Some(1), None)]);
+        assert_eq!(entries(&redline)[0].location, "old p. 1");
+        let first_sheet_second_line = Target {
+            sheet_index: 0,
+            top: LINE_PITCH,
+        };
+        assert_eq!(entries(&redline)[0].target, first_sheet_second_line);
+    }
+
+    #[test]
+    fn sheets_without_a_new_page_say_nothing_about_the_new_pages() {
+        let redline = redline(&["all old"], &["", ""]);
+        assert_eq!(shown_pages(&redline), [(Some(0), None)]);
+        assert_eq!(redline.sheets[0].note_above, None);
+        assert_eq!(redline.sheets[0].note_below, None);
     }
 
     #[test]

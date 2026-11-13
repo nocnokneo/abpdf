@@ -8,7 +8,6 @@ use krilla::surface::Surface;
 
 use super::text::TextFont;
 use super::{Rgb, Summary, SummaryEntry};
-use crate::BySide;
 use crate::excerpt::shortened;
 use crate::geometry::Size;
 
@@ -84,11 +83,10 @@ fn height_of(entry: &SummaryEntry) -> f32 {
 /// The lines of an entry: the sign, the color and the text of each side
 /// that has text.
 fn lines_of(entry: &SummaryEntry) -> impl Iterator<Item = (&'static str, Rgb, &str)> {
-    let lines = [
-        ("−", Rgb::REMOVED, entry.texts.old.as_str()),
-        ("+", Rgb::ADDED, entry.texts.new.as_str()),
-    ];
-    lines.into_iter().filter(|(_, _, text)| !text.is_empty())
+    let texts = entry.texts.as_ref().map(|text| text.as_deref());
+    let lines = [("−", Rgb::REMOVED, texts.old), ("+", Rgb::ADDED, texts.new)];
+    let with_text = |(sign, color, text): (_, _, Option<_>)| Some((sign, color, text?));
+    lines.into_iter().filter_map(with_text)
 }
 
 /// Draws the pages. `destinations` has, for each entry, the view of the
@@ -191,11 +189,12 @@ fn counts_line(change_count: usize, sheet_count: usize) -> String {
 /// The title of the bookmark of the entry at `index`.
 pub(super) fn bookmark_title(index: usize, entry: &SummaryEntry) -> String {
     let texts = entry.texts.as_ref();
-    let BySide { old, new } = texts.map(|text| shortened(text, BOOKMARK_TEXT_CHARS));
-    let texts = match (old.is_empty(), new.is_empty()) {
-        (true, _) => format!("+ {new}"),
-        (_, true) => format!("− {old}"),
-        _ => format!("{old} → {new}"),
+    let texts = texts.map(|text| Some(shortened(text.as_ref()?, BOOKMARK_TEXT_CHARS)));
+    let texts = match (texts.old, texts.new) {
+        (Some(old), Some(new)) => format!("{old} → {new}"),
+        (Some(old), None) => format!("− {old}"),
+        (None, Some(new)) => format!("+ {new}"),
+        (None, None) => String::new(),
     };
     format!("{}. {texts}", index + 1)
 }
@@ -203,15 +202,17 @@ pub(super) fn bookmark_title(index: usize, entry: &SummaryEntry) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::BySide;
     use crate::redline::Target;
 
-    fn entry(old_text: &str, new_text: &str) -> SummaryEntry {
+    fn entry(old_text: Option<&str>, new_text: Option<&str>) -> SummaryEntry {
+        let texts = BySide {
+            old: old_text,
+            new: new_text,
+        };
         SummaryEntry {
             location: "old p. 1 / new p. 1".to_owned(),
-            texts: BySide {
-                old: old_text.to_owned(),
-                new: new_text.to_owned(),
-            },
+            texts: texts.map(|text| text.map(str::to_owned)),
             target: Target {
                 sheet_index: 0,
                 top: 0.0,
@@ -249,7 +250,7 @@ mod tests {
             height: 2.0 * MARGIN + HEADING_HEIGHT + 3.0 * entry_pitch,
         };
         assert_eq!((HEADING_HEIGHT / entry_pitch).floor(), 3.0);
-        let entries = (0..10).map(|_| entry("old", "")).collect();
+        let entries = (0..10).map(|_| entry(Some("old"), None)).collect();
         let pages = SummaryPages::of(&summary_of(entries), Some(page_size));
         assert_eq!(
             entries_by_page(&pages),
@@ -263,7 +264,11 @@ mod tests {
             width: 600.0,
             height: 2.0 * MARGIN + HEADING_HEIGHT + LINE_HEIGHT,
         };
-        let entries = vec![entry("old", ""), entry("old", ""), entry("old", "")];
+        let entries = vec![
+            entry(Some("old"), None),
+            entry(Some("old"), None),
+            entry(Some("old"), None),
+        ];
         let pages = SummaryPages::of(&summary_of(entries), Some(page_size));
         let tops: Vec<Vec<f32>> = pages
             .pages
@@ -282,8 +287,8 @@ mod tests {
     #[test]
     fn entry_with_both_texts_takes_two_lines() {
         assert_eq!(
-            height_of(&entry("old", "new")),
-            2.0 * height_of(&entry("", "new"))
+            height_of(&entry(Some("old"), Some("new"))),
+            2.0 * height_of(&entry(None, Some("new")))
         );
     }
 
@@ -293,16 +298,22 @@ mod tests {
             width: 600.0,
             height: 2.0 * MARGIN,
         };
-        let entries = vec![entry("old", "new"), entry("old", "new")];
+        let entries = vec![
+            entry(Some("old"), Some("new")),
+            entry(Some("old"), Some("new")),
+        ];
         let pages = SummaryPages::of(&summary_of(entries), Some(page_size));
         assert_eq!(entries_by_page(&pages), [vec![0], vec![1]]);
     }
 
     #[test]
     fn bookmark_names_the_change() {
-        assert_eq!(bookmark_title(0, &entry("old", "new")), "1. old → new");
-        assert_eq!(bookmark_title(1, &entry("", "new")), "2. + new");
-        assert_eq!(bookmark_title(2, &entry("old", "")), "3. − old");
+        assert_eq!(
+            bookmark_title(0, &entry(Some("old"), Some("new"))),
+            "1. old → new"
+        );
+        assert_eq!(bookmark_title(1, &entry(None, Some("new"))), "2. + new");
+        assert_eq!(bookmark_title(2, &entry(Some("old"), None)), "3. − old");
     }
 
     #[test]

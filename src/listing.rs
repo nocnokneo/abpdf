@@ -2,7 +2,7 @@
 
 use std::io::{self, Write};
 
-use crate::change::Comparison;
+use crate::change::{ChangeSide, Comparison};
 use crate::excerpt::shortened;
 
 /// Longer texts are cut off, so that one change stays a few lines.
@@ -13,9 +13,9 @@ const MAX_TEXT_CHARS: usize = 200;
 pub fn write(comparison: &Comparison, mut output: impl Write) -> io::Result<()> {
     for change in &comparison.changes {
         writeln!(output, "@ {}", change.location())?;
-        let texts = change.sides.as_ref().map(|side| &side.text);
+        let texts = change.sides.as_ref().map(ChangeSide::text);
         for (sign, text) in [('-', texts.old), ('+', texts.new)] {
-            if !text.is_empty() {
+            if let Some(text) = text {
                 writeln!(output, "{sign} {}", shortened(text, MAX_TEXT_CHARS))?;
             }
         }
@@ -44,6 +44,11 @@ mod tests {
             listing("keep old text and more", "keep new text and more still"),
             "@ old p. 1 / new p. 1\n- old\n+ new\n@ old p. 1 / new p. 1\n+ still\n2 changes\n"
         );
+    }
+
+    #[test]
+    fn side_that_is_nowhere_in_its_document_has_no_page() {
+        assert_eq!(listing("", "new"), "@ new p. 1\n+ new\n1 change\n");
     }
 
     #[test]

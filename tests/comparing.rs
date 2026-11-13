@@ -5,7 +5,7 @@ mod common;
 use std::sync::Arc;
 
 use abpdf::BySide;
-use abpdf::change::{ChangeKind, Comparison};
+use abpdf::change::{ChangeKind, ChangeSide, Comparison};
 use abpdf::filter::Filters;
 use abpdf::profile::Profile;
 
@@ -64,10 +64,11 @@ fn summaries(comparison: &Comparison) -> Vec<(ChangeKind, &str, &str)> {
         .changes
         .iter()
         .map(|change| {
+            let texts = change.sides.as_ref().map(ChangeSide::text);
             (
-                change.kind,
-                change.sides.old.text.as_str(),
-                change.sides.new.text.as_str(),
+                change.kind(),
+                texts.old.unwrap_or_default(),
+                texts.new.unwrap_or_default(),
             )
         })
         .collect()
@@ -117,8 +118,10 @@ fn change_is_located_on_its_text() {
         .iter()
         .find(|token| token.text == "calibrated")
         .expect("the old revision has the word");
-    let (area, fragment) = (replaced.sides.old.areas[0], word.fragments[0]);
-    assert_eq!(replaced.sides.old.areas.len(), 1);
+    let [area] = replaced.sides.old.areas() else {
+        panic!("{:?}", replaced.sides.old);
+    };
+    let fragment = word.fragments[0];
     assert_eq!(area.page_index, fragment.page_index);
     assert!(area.bounds.left < fragment.bounds.left && fragment.bounds.right < area.bounds.right);
     assert_eq!(

@@ -40,17 +40,18 @@ pub struct Summary {
 pub struct SummaryEntry {
     /// Where the change is in the documents, for a reader.
     pub location: String,
-    /// The text that each document has at the change.
-    pub texts: BySide<String>,
+    /// The text that each document has at the change, if it has any.
+    pub texts: BySide<Option<String>>,
     /// Where the sheets show the change, which the entry links to.
     pub target: Target,
 }
 
-/// A place on the new page of a sheet.
+/// A place on a sheet.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Target {
     pub sheet_index: usize,
-    /// The distance from the top edge of the page.
+    /// The distance from the top edge of the pages, which are level on a
+    /// sheet.
     pub top: f32,
 }
 

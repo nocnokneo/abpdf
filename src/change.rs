@@ -20,9 +20,10 @@ pub struct Comparison {
     pub changes: Vec<Change>,
 }
 
+/// A place where the documents differ.
+/// At least one of them has text there.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Change {
-    pub kind: ChangeKind,
     pub sides: BySide<ChangeSide>,
 }
 
@@ -38,14 +39,21 @@ pub enum ChangeKind {
 
 /// What one document has at a change.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ChangeSide {
-    /// The changed text, which is empty on the old side of an insertion and
-    /// on the new side of a deletion.
-    pub text: String,
-    /// Where the text is: one area per line, in reading order.
-    /// For a side without text, one area of no width where the text of the
-    /// other side would be.
-    pub areas: Vec<Area>,
+pub enum ChangeSide {
+    /// Text that the other document does not have.
+    Text {
+        text: String,
+        /// Where the text is: one area per line, in reading order.
+        areas: Vec<Area>,
+    },
+    /// Nothing, where the other document has text.
+    Absent {
+        /// The place where the text of the other document would be, as an
+        /// area of no width.
+        /// `None` if nothing of the document is compared, so that there is
+        /// no text for the place to be next to.
+        insertion_point: Option<Area>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -70,24 +78,54 @@ impl Comparison {
 }
 
 impl Change {
+    pub fn kind(&self) -> ChangeKind {
+        match (self.sides.old.text(), self.sides.new.text()) {
+            (None, _) => ChangeKind::Inserted,
+            (_, None) => ChangeKind::Deleted,
+            _ => ChangeKind::Replaced,
+        }
+    }
+
     /// The pages on which the two sides start, in words and as a reader
     /// counts them.
+    /// A side that is nowhere in its document is not mentioned.
     pub fn location(&self) -> String {
-        let first_page_number = |side: Side| self.sides[side].areas[0].page_index + 1;
-        format!(
-            "old p. {} / new p. {}",
-            first_page_number(Side::Old),
-            first_page_number(Side::New)
-        )
+        let pages = Side::BOTH.into_iter().filter_map(|side| {
+            let page_number = self.sides[side].first_page_index()? + 1;
+            Some(format!("{side} p. {page_number}"))
+        });
+        pages.collect::<Vec<_>>().join(" / ")
     }
 }
 
 impl ChangeSide {
+    pub fn text(&self) -> Option<&str> {
+        match self {
+            Self::Text { text, .. } => Some(text),
+            Self::Absent { .. } => None,
+        }
+    }
+
+    /// Where the side is in its document: the areas of its text, or the
+    /// place where it has none.
+    pub fn areas(&self) -> &[Area] {
+        match self {
+            Self::Text { areas, .. } => areas,
+            Self::Absent { insertion_point } => insertion_point.as_slice(),
+        }
+    }
+
     /// The pages that the side is on, in reading order and without repeats.
     pub fn page_indices(&self) -> Vec<usize> {
-        let mut page_indices: Vec<usize> = self.areas.iter().map(|area| area.page_index).collect();
+        let areas = self.areas().iter();
+        let mut page_indices: Vec<usize> = areas.map(|area| area.page_index).collect();
         page_indices.dedup();
         page_indices
+    }
+
+    /// The page on which the side starts, if it is anywhere in its document.
+    pub fn first_page_index(&self) -> Option<usize> {
+        Some(self.areas().first()?.page_index)
     }
 }
 
@@ -114,13 +152,7 @@ impl<'a> Compared<'a> {
 }
 
 fn change_at(hunk: &Hunk, compared: &BySide<Compared>) -> Change {
-    let kind = match (hunk.old.is_empty(), hunk.new.is_empty()) {
-        (true, _) => ChangeKind::Inserted,
-        (_, true) => ChangeKind::Deleted,
-        _ => ChangeKind::Replaced,
-    };
     Change {
-        kind,
         sides: BySide::from_fn(|side| change_side(&compared[side], &hunk[side])),
     }
 }
@@ -128,12 +160,11 @@ fn change_at(hunk: &Hunk, compared: &BySide<Compared>) -> Change {
 fn change_side(compared: &Compared, range: &Range<usize>) -> ChangeSide {
     let tokens = &compared.tokens[range.clone()];
     if tokens.is_empty() {
-        return ChangeSide {
-            text: String::new(),
-            areas: vec![insertion_point(compared, range.start)],
+        return ChangeSide::Absent {
+            insertion_point: insertion_point(compared, range.start),
         };
     }
-    ChangeSide {
+    ChangeSide::Text {
         text: text_of(tokens),
         areas: areas_of(tokens),
     }
@@ -171,36 +202,27 @@ fn areas_of(tokens: &[&Token]) -> Vec<Area> {
 }
 
 /// Where text would be that came before the compared token at `position`:
-/// at the end of the token before it, or else at the start of that token.
-fn insertion_point(compared: &Compared, position: usize) -> Area {
+/// at the end of the token before it, or else at the start of the first
+/// token, if there is one.
+fn insertion_point(compared: &Compared, position: usize) -> Option<Area> {
     let before = position.checked_sub(1).map(|index| compared.tokens[index]);
     if let Some(fragment) = before.and_then(|token| token.fragments.last()) {
-        return Area {
+        return Some(Area {
             page_index: fragment.page_index,
             bounds: Rect {
                 left: fragment.bounds.right,
                 ..fragment.bounds
             },
-        };
+        });
     }
-    match compared.tokens.first().map(|token| token.fragments[0]) {
-        Some(fragment) => Area {
-            page_index: fragment.page_index,
-            bounds: Rect {
-                right: fragment.bounds.left,
-                ..fragment.bounds
-            },
+    let fragment = compared.tokens.first()?.fragments[0];
+    Some(Area {
+        page_index: fragment.page_index,
+        bounds: Rect {
+            right: fragment.bounds.left,
+            ..fragment.bounds
         },
-        None => Area {
-            page_index: 0,
-            bounds: Rect {
-                left: 0.0,
-                top: 0.0,
-                right: 0.0,
-                bottom: 0.0,
-            },
-        },
-    }
+    })
 }
 
 #[cfg(test)]
@@ -231,10 +253,11 @@ mod tests {
         changes
             .iter()
             .map(|change| {
+                let texts = change.sides.as_ref().map(ChangeSide::text);
                 (
-                    change.kind,
-                    change.sides.old.text.as_str(),
-                    change.sides.new.text.as_str(),
+                    change.kind(),
+                    texts.old.unwrap_or_default(),
+                    texts.new.unwrap_or_default(),
                 )
             })
             .collect()
@@ -257,19 +280,47 @@ mod tests {
     fn inserted_text_is_only_on_the_new_side() {
         let changes = compare("one three", "one two three");
         assert_eq!(summaries(&changes), [(ChangeKind::Inserted, "", "two")]);
-        assert_eq!(changes[0].sides.new.areas, [cells(0, 0, 4..7)]);
+        assert_eq!(changes[0].sides.new.areas(), [cells(0, 0, 4..7)]);
     }
 
     #[test]
     fn side_without_text_is_located_after_the_token_before_it() {
         let changes = compare("one three", "one two three");
-        assert_eq!(changes[0].sides.old.areas, [cells(0, 0, 3..3)]);
+        let insertion_point = Some(cells(0, 0, 3..3));
+        assert_eq!(changes[0].sides.old, ChangeSide::Absent { insertion_point });
     }
 
     #[test]
     fn insertion_before_all_text_is_located_at_the_first_token() {
         let changes = compare("one", "zero one");
-        assert_eq!(changes[0].sides.old.areas, [cells(0, 0, 0..0)]);
+        assert_eq!(changes[0].sides.old.areas(), [cells(0, 0, 0..0)]);
+    }
+
+    #[test]
+    fn side_of_a_document_without_text_is_nowhere() {
+        let new = || [PageBuilder::new().text("one")];
+        let nowhere = ChangeSide::Absent {
+            insertion_point: None,
+        };
+        let empty_page = [PageBuilder::new()];
+        let no_pages: [PageBuilder; 0] = [];
+        let from_empty_page = compare_with(empty_page, new(), &Filters::default());
+        let from_no_pages = compare_with(no_pages, new(), &Filters::default());
+        for changes in [from_empty_page, from_no_pages] {
+            assert_eq!(changes[0].sides.old, nowhere);
+            assert_eq!(changes[0].location(), "new p. 1");
+        }
+    }
+
+    #[test]
+    fn location_names_the_page_that_each_side_starts_on() {
+        let old = [
+            PageBuilder::new().text("keep"),
+            PageBuilder::new().text("old words"),
+        ];
+        let new = [PageBuilder::new().text("keep new words")];
+        let changes = compare_with(old, new, &Filters::default());
+        assert_eq!(changes[0].location(), "old p. 2 / new p. 1");
     }
 
     #[test]
@@ -309,9 +360,9 @@ mod tests {
     #[test]
     fn change_has_one_area_per_line() {
         let changes = compare("keep old\nwords here", "keep here");
-        assert_eq!(changes[0].sides.old.text, "old words");
+        assert_eq!(changes[0].sides.old.text(), Some("old words"));
         assert_eq!(
-            changes[0].sides.old.areas,
+            changes[0].sides.old.areas(),
             [cells(0, 0, 5..8), cells(0, 1, 0..5)]
         );
     }
@@ -386,6 +437,6 @@ mod tests {
         };
         let changes = compare_with([page("old")], [page("new")], &Filters::default());
         assert_eq!(summaries(&changes), [(ChangeKind::Replaced, "old", "new")]);
-        assert_eq!(changes[0].sides.old.areas, [cells(0, 0, 0..3)]);
+        assert_eq!(changes[0].sides.old.areas(), [cells(0, 0, 0..3)]);
     }
 }

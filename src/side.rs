@@ -12,6 +12,13 @@ pub enum Side {
 
 impl Side {
     pub const BOTH: [Side; 2] = [Side::Old, Side::New];
+
+    pub fn other(self) -> Side {
+        match self {
+            Side::Old => Side::New,
+            Side::New => Side::Old,
+        }
+    }
 }
 
 impl fmt::Display for Side {
