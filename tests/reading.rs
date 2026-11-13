@@ -8,7 +8,7 @@ use abpdf::flow::{Flow, Token};
 use abpdf::reader::pdfium::PdfiumReader;
 use abpdf::reader::{Color, Page, ReadError, Reader, Span, TextItem};
 
-use common::{corpus, flow_of, texts, token};
+use common::{corpus, flow_of, raw_flow_of, texts, token};
 
 const POINTS_PER_CENTIMETER: f32 = 72.0 / 2.54;
 
@@ -18,12 +18,6 @@ fn tagged() -> Flow {
 
 fn untagged() -> Flow {
     flow_of(corpus("reading-untagged.pdf"))
-}
-
-fn on_page(flow: &Flow, page_index: usize) -> impl Iterator<Item = &Token> {
-    flow.tokens
-        .iter()
-        .filter(move |token| token.fragments[0].page_index == page_index)
 }
 
 /// The pages of a PDF of the corpus as the reader reports them.
@@ -77,8 +71,14 @@ fn tagging_is_detected() {
 
 #[test]
 fn tagged_and_untagged_documents_read_as_the_same_text() {
-    let (tagged, untagged) = (tagged(), untagged());
-    assert_eq!(texts(&tagged.tokens), texts(&untagged.tokens));
+    let raw_texts = |file_name| -> Vec<String> {
+        let tokens = raw_flow_of(corpus(file_name)).tokens;
+        tokens.into_iter().map(|token| token.text).collect()
+    };
+    assert_eq!(
+        raw_texts("reading-tagged.pdf"),
+        raw_texts("reading-untagged.pdf")
+    );
 }
 
 #[test]
@@ -92,7 +92,7 @@ fn pages_are_measured_in_points() {
 
 #[test]
 fn positions_are_measured_from_the_top_left_corner() {
-    let flow = tagged();
+    let flow = untagged();
     let page_height = flow.page_sizes[0].height;
     let header = token(&flow, "Reading").fragments[0].bounds;
     let footer = token(&flow, "Page").fragments[0].bounds;
@@ -108,17 +108,17 @@ fn positions_are_measured_from_the_top_left_corner() {
 #[test]
 fn page_furniture_is_excluded_when_the_producer_marks_it() {
     let flow = tagged();
-    let compared: Vec<&Token> = flow
-        .tokens
-        .iter()
-        .filter(|token| !token.is_excluded())
-        .collect();
-    let compared_texts = texts(compared.iter().copied());
+    let compared_texts = texts(&flow.tokens);
+    let excluded_texts = texts(flow.excluded.iter().map(|excluded| &excluded.token));
 
     for furniture in ["Reading", "corpus", "Draft", "Page"] {
         assert!(
             !compared_texts.contains(&furniture),
             "{furniture} is compared"
+        );
+        assert!(
+            excluded_texts.contains(&furniture),
+            "{furniture} is not excluded"
         );
     }
     // The page reference that the source marks as an artifact, and the
@@ -136,23 +136,19 @@ fn page_furniture_is_excluded_when_the_producer_marks_it() {
 #[test]
 fn table_header_is_excluded_where_it_repeats() {
     let flow = tagged();
-    let headers_by_page: Vec<Vec<bool>> = (0..flow.page_sizes.len())
-        .map(|page_index| {
-            on_page(&flow, page_index)
-                .filter(|token| token.text == "Key")
-                .map(Token::is_excluded)
-                .collect()
-        })
-        .collect();
-    assert_eq!(
-        headers_by_page,
-        [vec![], vec![false], vec![true], vec![true]]
-    );
+    fn pages_of_header<'a>(tokens: impl IntoIterator<Item = &'a Token>) -> Vec<usize> {
+        let headers = tokens.into_iter().filter(|token| token.text == "Key");
+        headers.map(|token| token.fragments[0].page_index).collect()
+    }
+    // The table starts on the second page and continues on two more.
+    assert_eq!(pages_of_header(&flow.tokens), [1]);
+    let excluded = flow.excluded.iter().map(|excluded| &excluded.token);
+    assert_eq!(pages_of_header(excluded), [2, 3]);
 }
 
 #[test]
 fn nothing_is_excluded_without_tags() {
-    assert!(untagged().tokens.iter().all(|token| !token.is_excluded()));
+    assert_eq!(untagged().excluded, []);
 }
 
 #[test]

@@ -1,7 +1,7 @@
 use super::*;
 use crate::filter::Filters;
 use crate::testing::{
-    CELL_HEIGHT, CELL_WIDTH, LINE_PITCH, PageBuilder, compared_texts, raw_flow_of, texts,
+    CELL_HEIGHT, CELL_WIDTH, LINE_PITCH, PageBuilder, excluded_texts, raw_flow_of, texts,
 };
 
 /// The flow of a document with these pages, as the comparison sees it.
@@ -69,9 +69,9 @@ fn artifact_is_split_from_content_it_touches() {
         .body()
         .text(".");
     let flow = flow_of([page]);
-    assert_eq!(texts(&flow), ["(", "p", ".", "3", ")", "."]);
-    assert_eq!(compared_texts(&flow), ["."]);
-    assert_eq!(flow.tokens[0].exclusion, Some(Exclusion::Artifact));
+    assert_eq!(texts(&flow), ["."]);
+    assert_eq!(excluded_texts(&flow), ["(", "p", ".", "3", ")"]);
+    assert_eq!(flow.excluded[0].exclusion, Exclusion::Artifact);
 }
 
 #[test]
@@ -113,7 +113,6 @@ fn soft_hyphen_that_the_producer_marks_joins_the_word() {
     assert_eq!(lines, [0, 1]);
     let hyphen_right = 9.0 * CELL_WIDTH;
     assert_eq!(word.fragments[0].bounds.right, hyphen_right);
-    assert_eq!(word.line_end_hyphen, None);
 }
 
 #[test]
@@ -216,7 +215,7 @@ fn word_joins_across_a_page_break_and_its_page_furniture() {
         .body()
         .text("national one");
     let flow = flow_of([first_page, second_page]);
-    assert_eq!(compared_texts(&flow), ["an", "international", "one"]);
+    assert_eq!(texts(&flow), ["an", "international", "one"]);
 
     let pages: Vec<usize> = flow.tokens[1]
         .fragments
@@ -237,7 +236,8 @@ fn hyphen_does_not_join_a_word_to_page_furniture() {
         .text("Footer");
     let second_page = PageBuilder::new().text("national");
     let flow = flow_of([first_page, second_page]);
-    assert_eq!(texts(&flow), ["international", "Footer"]);
+    assert_eq!(texts(&flow), ["international"]);
+    assert_eq!(excluded_texts(&flow), ["Footer"]);
 }
 
 #[test]
@@ -257,13 +257,9 @@ fn hyphen_of_excluded_text_is_only_part_of_its_bounds() {
         .line_end_hyphen()
         .text("line");
     let flow = flow_of([page]);
-    assert_eq!(texts(&flow), ["head", "line"]);
-    assert_eq!(flow.tokens[0].fragments[0].bounds.right, 5.0 * CELL_WIDTH);
-    assert!(
-        flow.tokens
-            .iter()
-            .all(|token| token.line_end_hyphen.is_none())
-    );
+    assert_eq!(excluded_texts(&flow), ["head", "line"]);
+    let head = &flow.excluded[0].token;
+    assert_eq!(head.fragments[0].bounds.right, 5.0 * CELL_WIDTH);
 }
 
 #[test]

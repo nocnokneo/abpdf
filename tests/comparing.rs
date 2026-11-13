@@ -9,7 +9,7 @@ use abpdf::change::{ChangeKind, ChangeSide, Comparison};
 use abpdf::filter::Filters;
 use abpdf::profile::Profile;
 
-use common::{both, compare, compare_and_redline, corpus, corpus_path, flow_of, texts};
+use common::{both, compare, compare_and_redline, corpus, corpus_path, page_texts};
 
 use ChangeKind::{Deleted, Inserted, Replaced};
 
@@ -134,15 +134,10 @@ fn change_is_located_on_its_text() {
 fn redline_lists_the_changes_and_shows_their_pages() {
     let (_, redline, output) = compare_and_redline(revisions("tagged"), &profile().filters);
 
-    let flow = flow_of(Arc::new(output));
-    let page_count = flow.page_sizes.len();
-    assert_eq!(page_count, 1 + redline.sheets.len());
-    let on_page = |page_index: usize| -> Vec<&str> {
-        let tokens = flow.tokens.iter();
-        texts(tokens.filter(|token| token.fragments[0].page_index == page_index))
-    };
+    let pages = page_texts(Arc::new(output));
+    assert_eq!(pages.len(), 1 + redline.sheets.len());
 
-    let summary = on_page(0).join(" ");
+    let summary = &pages[0];
     assert!(
         summary.starts_with("old.pdf → new.pdf 11 changes on 4 sheets"),
         "{summary}"
@@ -156,7 +151,7 @@ fn redline_lists_the_changes_and_shows_their_pages() {
         "{summary}"
     );
 
-    let first_sheet = on_page(1).join(" ");
+    let first_sheet = &pages[1];
     assert!(
         first_sheet.contains("old.pdf — page 1 of 3"),
         "{first_sheet}"
@@ -167,7 +162,7 @@ fn redline_lists_the_changes_and_shows_their_pages() {
     );
     // The source pages are there as text, both of them.
     assert_eq!(first_sheet.matches("Operating manual").count(), 2);
-    let last_sheet = on_page(page_count - 1).join(" ");
+    let last_sheet = pages.last().unwrap();
     assert!(
         last_sheet.contains("Despite the robustness"),
         "{last_sheet}"
@@ -187,7 +182,7 @@ fn redline_of_equal_documents_is_a_summary_that_says_so() {
     let pdfs = both(revisions("tagged").old);
     let (_, _, output) = compare_and_redline(pdfs, &Filters::default());
 
-    let flow = flow_of(Arc::new(output));
-    assert_eq!(flow.page_sizes.len(), 1);
-    assert!(texts(&flow.tokens).join(" ").ends_with("No differences"));
+    let pages = page_texts(Arc::new(output));
+    assert_eq!(pages.len(), 1);
+    assert!(pages[0].ends_with("No differences"), "{}", pages[0]);
 }

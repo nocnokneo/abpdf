@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use super::{HyphenKind, Token};
+use super::{HyphenKind, RawToken};
 use crate::reader::Span;
 
 /// The kind that the producer names for the hyphen that a span draws, if it
@@ -69,7 +69,7 @@ impl HyphenMarks {
 
     /// Gives each unmarked hyphen the kind that follows from the marked
     /// hyphens of its font, where one does.
-    pub fn resolve_unmarked(&self, tokens: &mut [Token]) {
+    pub fn resolve_unmarked(&self, tokens: &mut [RawToken]) {
         for hyphen in &self.unmarked {
             let marks = self.by_font.get(&hyphen.font_name);
             let kind = marks.map_or(HyphenKind::Unknown, FontMarks::kind_of_unmarked);

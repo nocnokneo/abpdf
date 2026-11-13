@@ -8,7 +8,7 @@ use std::sync::Arc;
 use abpdf::BySide;
 use abpdf::change::Comparison;
 use abpdf::filter::Filters;
-use abpdf::flow::{self, Flow, Token};
+use abpdf::flow::{self, Flow, RawFlow, Token};
 use abpdf::reader::pdfium::PdfiumReader;
 use abpdf::redline::{self, Redline};
 
@@ -27,9 +27,9 @@ pub fn corpus(file_name: &str) -> Arc<Vec<u8>> {
 }
 
 /// The flow of a PDF as it is read.
-pub fn raw_flow_of(pdf: Arc<Vec<u8>>) -> Flow {
+pub fn raw_flow_of(pdf: Arc<Vec<u8>>) -> RawFlow {
     let reader = PdfiumReader::open(pdf).expect("the PDF opens");
-    Flow::read(&reader).expect("the PDF reads")
+    RawFlow::read(&reader).expect("the PDF reads")
 }
 
 /// The flow of a PDF as the comparison sees it.
@@ -63,6 +63,17 @@ pub fn compare_and_redline(
     let redline = Redline::of(&comparison, names);
     let pdf = redline::write(&redline, pdfs).expect("the redline is written");
     (comparison, redline, pdf)
+}
+
+/// The text that each page of a PDF reads as, with a space between its
+/// tokens.
+pub fn page_texts(pdf: Arc<Vec<u8>>) -> Vec<String> {
+    let flow = raw_flow_of(pdf);
+    let mut pages = vec![Vec::new(); flow.page_sizes.len()];
+    for token in &flow.tokens {
+        pages[token.fragment.page_index].push(token.text.as_str());
+    }
+    pages.iter().map(|texts| texts.join(" ")).collect()
 }
 
 pub fn texts<'a>(tokens: impl IntoIterator<Item = &'a Token>) -> Vec<&'a str> {

@@ -5,7 +5,7 @@ use std::mem;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::hyphen_marks::{self, HyphenMarks};
-use super::{Flow, Fragment, Gap, HyphenKind, LineEndHyphen, Token};
+use super::{Fragment, Gap, HyphenKind, LineEndHyphen, RawFlow, RawToken};
 use crate::geometry::{Rect, Size};
 use crate::reader::{Char, Page, TextItem};
 
@@ -18,7 +18,7 @@ const INVISIBLE_CHARACTERS: [char; 3] = ['\u{200B}', '\u{2060}', '\u{FEFF}'];
 
 #[derive(Default)]
 pub struct FlowBuilder {
-    tokens: Vec<Token>,
+    tokens: Vec<RawToken>,
     page_sizes: Vec<Size>,
     hyphen_marks: HyphenMarks,
 }
@@ -40,9 +40,9 @@ impl FlowBuilder {
         .tokenize();
     }
 
-    pub fn finish(mut self) -> Flow {
+    pub fn finish(mut self) -> RawFlow {
         self.hyphen_marks.resolve_unmarked(&mut self.tokens);
-        Flow {
+        RawFlow {
             tokens: self.tokens,
             page_sizes: self.page_sizes,
         }
@@ -153,12 +153,11 @@ impl PageTokenizer<'_> {
             .map(|character| character.bounds)
             .reduce(|bounds, next| bounds.union(&next))
             .expect("a token has characters");
-        self.builder.tokens.push(Token {
+        self.builder.tokens.push(RawToken {
             text: text.to_owned(),
-            fragments: vec![self.fragment(bounds)],
+            fragment: self.fragment(bounds),
             gap: mem::replace(&mut self.gap, Gap::None),
             is_artifact: self.page.spans[first.span].is_artifact,
-            exclusion: None,
             line_end_hyphen: None,
         });
     }

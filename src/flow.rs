@@ -1,4 +1,7 @@
 //! The text of a document as one flow of tokens, across page boundaries.
+//!
+//! A [`RawFlow`] is the text as it is read.
+//! [`prepare`] makes of it the [`Flow`] that is compared.
 
 mod builder;
 mod hyphen_marks;
@@ -17,43 +20,62 @@ use crate::reader::{ReadError, Reader};
 pub use self::builder::FlowBuilder;
 use self::join::Vocabulary;
 
-/// Gets flows as [`Flow::read`] returns them ready to be compared with each
-/// other.
+/// Gets flows ready to be compared with each other.
 ///
 /// First the filters decide which tokens take part in the comparison.
 /// Then the words that a line break splits are rejoined, which has to come
 /// second: a word joins the next token that takes part, and the words of all
 /// the flows together tell what a hyphen is where the producer does not.
-pub fn prepare<const N: usize>(mut flows: [Flow; N], filters: &Filters) -> [Flow; N] {
-    for flow in &mut flows {
-        filters.apply(flow);
-    }
-    let vocabulary = Vocabulary::of(&flows);
-    for flow in &mut flows {
-        flow.join_broken_words(&vocabulary);
-    }
-    flows
+pub fn prepare<const N: usize>(flows: [RawFlow; N], filters: &Filters) -> [Flow; N] {
+    let exclusions = flows.each_ref().map(|flow| filters.exclusions(flow));
+    let vocabulary = Vocabulary::of(flows.iter().zip(&exclusions));
+    let mut exclusions = exclusions.into_iter();
+    flows.map(|flow| {
+        let exclusions = exclusions.next().expect("one list per flow");
+        join::join(flow, exclusions, &vocabulary)
+    })
 }
 
-/// The tokens of a document in reading order.
+/// The tokens of a document in reading order, as they are read.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Flow {
-    pub tokens: Vec<Token>,
+pub struct RawFlow {
+    pub tokens: Vec<RawToken>,
     pub page_sizes: Vec<Size>,
 }
 
-impl Flow {
+impl RawFlow {
     /// Reads every page of a document.
-    ///
-    /// Words that a line break splits are still in two tokens, and no token
-    /// is left out of the comparison yet: [`prepare`] does both.
-    pub fn read(reader: &dyn Reader) -> Result<Flow, ReadError> {
+    pub fn read(reader: &dyn Reader) -> Result<RawFlow, ReadError> {
         let mut builder = FlowBuilder::default();
         for page_index in 0..reader.page_count() {
             builder.add_page(&reader.read_page(page_index)?);
         }
         Ok(builder.finish())
     }
+}
+
+/// A word or a punctuation mark on one line.
+/// A word that a line break splits is two of these.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RawToken {
+    pub text: String,
+    /// Where the token is drawn.
+    pub fragment: Fragment,
+    /// The white space before the token.
+    pub gap: Gap,
+    /// Whether the producer marked the token as an artifact.
+    pub is_artifact: bool,
+    /// The hyphen that ends a line right after the token.
+    pub line_end_hyphen: Option<LineEndHyphen>,
+}
+
+/// The tokens of a document that are compared, in reading order.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Flow {
+    pub tokens: Vec<Token>,
+    /// The tokens that are left out of the comparison.
+    pub excluded: Vec<ExcludedToken>,
+    pub page_sizes: Vec<Size>,
 }
 
 /// A word or a punctuation mark.
@@ -65,14 +87,6 @@ pub struct Token {
     pub fragments: Vec<Fragment>,
     /// The white space before the token.
     pub gap: Gap,
-    /// Whether the producer marked the token as an artifact.
-    pub is_artifact: bool,
-    /// Why the token is left out of the comparison, if it is.
-    /// [`prepare`] decides.
-    pub exclusion: Option<Exclusion>,
-    /// The hyphen that ends a line right after the token, until [`prepare`]
-    /// has dealt with it.
-    pub line_end_hyphen: Option<LineEndHyphen>,
 }
 
 impl Token {
@@ -84,14 +98,19 @@ impl Token {
             _ => Cow::Owned(self.text.nfkc().collect()),
         }
     }
+}
 
-    pub fn is_word(&self) -> bool {
-        self.text.chars().next().is_some_and(char::is_alphanumeric)
-    }
+/// Whether the text of a token is a word, and not a punctuation mark.
+fn is_word(text: &str) -> bool {
+    text.chars().next().is_some_and(char::is_alphanumeric)
+}
 
-    pub fn is_excluded(&self) -> bool {
-        self.exclusion.is_some()
-    }
+/// A token that is left out of the comparison.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExcludedToken {
+    pub token: Token,
+    /// The rule that leaves the token out.
+    pub exclusion: Exclusion,
 }
 
 /// The part of a token on one line.

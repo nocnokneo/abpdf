@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use abpdf::change::Comparison;
-use abpdf::flow::Flow;
+use abpdf::flow::RawFlow;
 use abpdf::profile::Profile;
 use abpdf::reader::ReadError;
 use abpdf::reader::pdfium::PdfiumReader;
@@ -97,14 +97,14 @@ fn run(arguments: &Arguments) -> Result<bool, String> {
 }
 
 /// The bytes of a PDF and the flow of its text.
-fn read(path: &Path) -> Result<(Arc<Vec<u8>>, Flow), String> {
+fn read(path: &Path) -> Result<(Arc<Vec<u8>>, RawFlow), String> {
     let pdf = Arc::new(fs::read(path).map_err(|error| in_file(path, error))?);
     let reader = PdfiumReader::open(pdf.clone()).map_err(|error| match error {
         // Not a fault of this file.
         ReadError::EngineUnavailable(_) => error.to_string(),
         _ => in_file(path, error),
     })?;
-    let flow = Flow::read(&reader).map_err(|error| in_file(path, error))?;
+    let flow = RawFlow::read(&reader).map_err(|error| in_file(path, error))?;
     Ok((pdf, flow))
 }
 

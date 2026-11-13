@@ -4,7 +4,6 @@ mod common;
 
 use std::sync::Arc;
 
-use abpdf::flow::Flow;
 use abpdf::geometry::{Rect, Size};
 use abpdf::reader::Reader;
 use abpdf::reader::pdfium::PdfiumReader;
@@ -14,7 +13,7 @@ use abpdf::redline::{
 use abpdf::{BySide, Side};
 use pdf_writer::{Content, Finish, Name, Pdf, Ref, Str};
 
-use common::{both, corpus, flow_of, texts, token};
+use common::{both, corpus, flow_of, raw_flow_of, texts, token};
 
 /// How far a position may be from where it is expected, in points.
 const TOLERANCE: f32 = 0.05;
@@ -249,12 +248,11 @@ fn text_of_embedded_pages_stays_text() {
     };
     let output = redline::write(&redline, both(pdf.clone())).expect("the redline is written");
 
-    let read_all = |pdf| {
-        let reader = PdfiumReader::open(pdf).expect("the PDF opens");
-        Flow::read(&reader).expect("the PDF reads")
+    let raw_texts = |pdf| -> Vec<String> {
+        let tokens = raw_flow_of(pdf).tokens;
+        tokens.into_iter().map(|token| token.text).collect()
     };
-    let (source, sheets) = (read_all(pdf), read_all(Arc::new(output)));
-    assert_eq!(texts(&sheets.tokens), texts(&source.tokens));
+    assert_eq!(raw_texts(Arc::new(output)), raw_texts(pdf));
 }
 
 #[test]

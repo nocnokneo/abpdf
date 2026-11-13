@@ -1,9 +1,10 @@
-//! Rejoining words that a line break splits.
+//! Rejoining words that a line break splits, among the tokens that are
+//! compared.
 
 use std::collections::HashSet;
-use std::mem;
 
-use super::{Flow, Gap, HyphenKind, LineEndHyphen, Token};
+use super::{ExcludedToken, Exclusion, Flow, Gap, HyphenKind, LineEndHyphen, RawFlow, RawToken};
+use super::{Token, is_word};
 
 /// The words of the compared documents, which tell what a hyphen of unknown
 /// kind is.
@@ -18,17 +19,20 @@ pub(super) struct Vocabulary {
 }
 
 impl Vocabulary {
-    /// Collects the words of the tokens that take part in the comparison.
-    pub(super) fn of<'a>(flows: impl IntoIterator<Item = &'a Flow>) -> Self {
+    /// Collects the words of the tokens that take part in the comparison:
+    /// those of each flow that have no exclusion.
+    pub(super) fn of<'a>(
+        flows: impl IntoIterator<Item = (&'a RawFlow, &'a Vec<Option<Exclusion>>)>,
+    ) -> Self {
         let mut vocabulary = Self::default();
-        for flow in flows {
-            let compared: Vec<&Token> = flow
-                .tokens
-                .iter()
-                .filter(|token| !token.is_excluded())
+        for (flow, exclusions) in flows {
+            let tokens = flow.tokens.iter().zip(exclusions);
+            let compared: Vec<&RawToken> = tokens
+                .filter(|(_, exclusion)| exclusion.is_none())
+                .map(|(token, _)| token)
                 .collect();
             for token in &compared {
-                if token.is_word() {
+                if is_word(&token.text) {
                     vocabulary.words.insert(token.text.clone());
                 }
             }
@@ -36,12 +40,12 @@ impl Vocabulary {
                 let [first, hyphen, second] = window else {
                     continue;
                 };
-                let is_hyphenated_pair = first.is_word()
+                let is_hyphenated_pair = is_word(&first.text)
                     && first.line_end_hyphen.is_none()
                     && hyphen.text == "-"
                     && hyphen.gap == Gap::None
                     && hyphen.line_end_hyphen.is_none()
-                    && second.is_word()
+                    && is_word(&second.text)
                     && second.gap == Gap::None;
                 if is_hyphenated_pair {
                     vocabulary
@@ -63,62 +67,67 @@ fn hyphenated(first: &str, second: &str) -> String {
     format!("{first}-{second}")
 }
 
-impl Flow {
-    /// Resolves every [`Token::line_end_hyphen`].
-    ///
-    /// A soft hyphen joins its word to the next token that takes part in the
-    /// comparison, which may be on the next page with a footer and a header
-    /// in between.
-    /// A hard hyphen becomes a token of its own.
-    /// `vocabulary` decides about a hyphen of unknown kind.
-    pub(super) fn join_broken_words(&mut self, vocabulary: &Vocabulary) {
-        let mut joined: Vec<Token> = Vec::with_capacity(self.tokens.len());
-        // The index in `joined` of a token that waits for the rest of its word.
-        let mut open: Option<usize> = None;
+/// Sets the tokens that have an exclusion aside and resolves the line-end
+/// hyphens of the others.
+///
+/// A soft hyphen joins its word to the next token that takes part in the
+/// comparison, which may be on the next page with a footer and a header in
+/// between.
+/// A hard hyphen becomes a token of its own.
+/// `vocabulary` decides about a hyphen of unknown kind.
+pub(super) fn join(
+    flow: RawFlow,
+    exclusions: Vec<Option<Exclusion>>,
+    vocabulary: &Vocabulary,
+) -> Flow {
+    let mut tokens: Vec<Token> = Vec::with_capacity(flow.tokens.len());
+    let mut excluded = Vec::new();
+    // The hyphen after the last of `tokens`, until the token after it tells
+    // what it means.
+    let mut open_hyphen: Option<LineEndHyphen> = None;
 
-        for mut token in mem::take(&mut self.tokens) {
-            if token.is_excluded() {
-                if let Some(hyphen) = token.line_end_hyphen.take() {
-                    extend_last_fragment(&mut token, &hyphen);
-                }
-                joined.push(token);
-                continue;
-            }
-            if let Some(index) = open.take() {
-                let hyphen = joined[index].line_end_hyphen.take().expect("open token");
-                match meaning(&hyphen, &joined[index], Some(&token), vocabulary) {
-                    Meaning::LineBreakOnly => {
-                        let word = &mut joined[index];
-                        extend_last_fragment(word, &hyphen);
-                        word.text.push_str(&token.text);
-                        word.fragments.append(&mut token.fragments);
-                        word.line_end_hyphen = token.line_end_hyphen;
-                        open = word.line_end_hyphen.map(|_| index);
-                        continue;
-                    }
-                    Meaning::Punctuation => {
-                        joined.insert(index + 1, hyphen_token(&joined[index], &hyphen));
-                        token.gap = Gap::None;
-                    }
-                    Meaning::Nothing => extend_last_fragment(&mut joined[index], &hyphen),
-                }
-            }
-            if token.line_end_hyphen.is_some() {
-                open = Some(joined.len());
-            }
-            joined.push(token);
+    for (raw, exclusion) in flow.tokens.into_iter().zip(exclusions) {
+        if let Some(exclusion) = exclusion {
+            excluded.push(excluded_token(raw, exclusion));
+            continue;
         }
-
-        if let Some(index) = open {
-            let hyphen = joined[index].line_end_hyphen.take().expect("open token");
-            match meaning(&hyphen, &joined[index], None, vocabulary) {
+        let mut gap = raw.gap;
+        if let Some(hyphen) = open_hyphen.take() {
+            let word = tokens.last_mut().expect("a hyphen follows a token");
+            match meaning(&hyphen, &word.text, Some(&raw.text), vocabulary) {
+                Meaning::LineBreakOnly => {
+                    extend_to_hyphen(word, &hyphen);
+                    word.text.push_str(&raw.text);
+                    word.fragments.push(raw.fragment);
+                    open_hyphen = raw.line_end_hyphen;
+                    continue;
+                }
                 Meaning::Punctuation => {
-                    joined.insert(index + 1, hyphen_token(&joined[index], &hyphen));
+                    tokens.push(hyphen_token(&hyphen));
+                    gap = Gap::None;
                 }
-                _ => extend_last_fragment(&mut joined[index], &hyphen),
+                Meaning::Nothing => extend_to_hyphen(word, &hyphen),
             }
         }
-        self.tokens = joined;
+        open_hyphen = raw.line_end_hyphen;
+        tokens.push(Token {
+            text: raw.text,
+            fragments: vec![raw.fragment],
+            gap,
+        });
+    }
+
+    if let Some(hyphen) = open_hyphen {
+        let word = tokens.last_mut().expect("a hyphen follows a token");
+        match meaning(&hyphen, &word.text, None, vocabulary) {
+            Meaning::Punctuation => tokens.push(hyphen_token(&hyphen)),
+            _ => extend_to_hyphen(word, &hyphen),
+        }
+    }
+    Flow {
+        tokens,
+        excluded,
+        page_sizes: flow.page_sizes,
     }
 }
 
@@ -134,11 +143,11 @@ enum Meaning {
 
 fn meaning(
     hyphen: &LineEndHyphen,
-    before: &Token,
-    after: Option<&Token>,
+    before: &str,
+    after: Option<&str>,
     vocabulary: &Vocabulary,
 ) -> Meaning {
-    let Some(after) = after.filter(|after| before.is_word() && after.is_word()) else {
+    let Some(after) = after.filter(|after| is_word(before) && is_word(after)) else {
         return match hyphen.kind {
             HyphenKind::Soft => Meaning::Nothing,
             HyphenKind::Hard | HyphenKind::Unknown => Meaning::Punctuation,
@@ -147,7 +156,7 @@ fn meaning(
     let is_hard = match hyphen.kind {
         HyphenKind::Soft => false,
         HyphenKind::Hard => true,
-        HyphenKind::Unknown => vocabulary.says_hyphen_is_hard(&before.text, &after.text),
+        HyphenKind::Unknown => vocabulary.says_hyphen_is_hard(before, after),
     };
     if is_hard {
         Meaning::Punctuation
@@ -156,18 +165,31 @@ fn meaning(
     }
 }
 
-fn extend_last_fragment(token: &mut Token, hyphen: &LineEndHyphen) {
-    let last = token.fragments.last_mut().expect("a token has a fragment");
+/// Makes the hyphen part of where the word before it is drawn.
+fn extend_to_hyphen(word: &mut Token, hyphen: &LineEndHyphen) {
+    let last = word.fragments.last_mut().expect("a token has a fragment");
     last.bounds = last.bounds.union(&hyphen.fragment.bounds);
 }
 
-/// The hyphen as a token that follows `word` directly.
-fn hyphen_token(word: &Token, hyphen: &LineEndHyphen) -> Token {
+/// The hyphen as a token that follows its word directly.
+fn hyphen_token(hyphen: &LineEndHyphen) -> Token {
     Token {
         text: "-".to_owned(),
         fragments: vec![hyphen.fragment],
         gap: Gap::None,
-        line_end_hyphen: None,
-        ..word.clone()
     }
+}
+
+/// A token that is left out as it is read, with the hyphen that may end its
+/// line as part of where it is drawn.
+fn excluded_token(raw: RawToken, exclusion: Exclusion) -> ExcludedToken {
+    let mut token = Token {
+        text: raw.text,
+        fragments: vec![raw.fragment],
+        gap: raw.gap,
+    };
+    if let Some(hyphen) = raw.line_end_hyphen {
+        extend_to_hyphen(&mut token, &hyphen);
+    }
+    ExcludedToken { token, exclusion }
 }

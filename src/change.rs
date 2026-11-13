@@ -7,7 +7,7 @@ use std::ops::Range;
 
 use crate::diff::{self, Hunk};
 use crate::filter::Filters;
-use crate::flow::{self, Flow, Gap, Token};
+use crate::flow::{self, Flow, Gap, RawFlow, Token};
 use crate::geometry::Rect;
 use crate::{BySide, Side};
 
@@ -63,8 +63,7 @@ pub struct Area {
 }
 
 impl Comparison {
-    /// Compares two flows as [`Flow::read`] returns them.
-    pub fn of(flows: BySide<Flow>, filters: &Filters) -> Self {
+    pub fn of(flows: BySide<RawFlow>, filters: &Filters) -> Self {
         let [old, new] = flow::prepare([flows.old, flows.new], filters);
         let flows = BySide { old, new };
         let compared = flows.as_ref().map(Compared::of);
@@ -137,11 +136,7 @@ struct Compared<'a> {
 
 impl<'a> Compared<'a> {
     fn of(flow: &'a Flow) -> Self {
-        let tokens: Vec<&Token> = flow
-            .tokens
-            .iter()
-            .filter(|token| !token.is_excluded())
-            .collect();
+        let tokens: Vec<&Token> = flow.tokens.iter().collect();
         let keys = tokens.iter().map(|token| token.key()).collect();
         Self { tokens, keys }
     }
