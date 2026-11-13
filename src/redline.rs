@@ -144,7 +144,7 @@ pub enum WriteError {
     #[error("the {side} document has no page {page_number}")]
     NoSuchPage { side: Side, page_number: usize },
     #[error("cannot write the redline: {0}")]
-    Serialization(String),
+    Serialization(#[from] KrillaError),
 }
 
 /// Renders `redline` over the pages of the two source documents.
@@ -171,7 +171,7 @@ pub fn write(
         }
         rendered => rendered,
     };
-    rendered.map_err(|error| WriteError::Serialization(format!("{error:?}")))
+    Ok(rendered?)
 }
 
 struct Sources {

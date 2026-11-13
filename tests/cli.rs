@@ -177,6 +177,19 @@ fn profile_with_a_mistake_exits_with_2() {
 }
 
 #[test]
+fn profile_that_is_missing_exits_with_2_and_is_named_once() {
+    let (pdf, profile) = (corpus("revisions-old-tagged.pdf"), corpus("no-such.toml"));
+    let output = abpdf(&[&pdf, &pdf, "--profile".as_ref(), &profile]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        stderr(&output).matches("no-such.toml").count(),
+        1,
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
 fn missing_arguments_exit_with_2() {
     let output = abpdf(&[]);
     assert_eq!(output.status.code(), Some(2));
