@@ -5,9 +5,10 @@ use std::mem;
 
 use unicode_segmentation::UnicodeSegmentation;
 
+use super::hyphen_marks::{self, HyphenMarks};
 use super::{Flow, Fragment, Gap, HyphenKind, LineEndHyphen, Token};
 use crate::geometry::{Rect, Size};
-use crate::reader::{Char, Color, Page, Span, Style, TextItem};
+use crate::reader::{Char, Color, Page, Style, TextItem};
 
 const SOFT_HYPHEN: char = '\u{AD}';
 
@@ -22,8 +23,7 @@ pub struct FlowBuilder {
     styles: StyleTable,
     structure_paths: StructurePathTable,
     page_sizes: Vec<Size>,
-    hyphen_marks_by_font: HashMap<String, HyphenMarks>,
-    unmarked_hyphens: Vec<UnmarkedHyphen>,
+    hyphen_marks: HyphenMarks,
 }
 
 impl FlowBuilder {
@@ -45,15 +45,7 @@ impl FlowBuilder {
     }
 
     pub fn finish(mut self) -> Flow {
-        for hyphen in &self.unmarked_hyphens {
-            let kind = self
-                .hyphen_marks_by_font
-                .get(&hyphen.font_name)
-                .map_or(HyphenKind::Unknown, HyphenMarks::kind_of_unmarked);
-            if let Some(line_end_hyphen) = &mut self.tokens[hyphen.token_index].line_end_hyphen {
-                line_end_hyphen.kind = kind;
-            }
-        }
+        self.hyphen_marks.resolve_unmarked(&mut self.tokens);
         Flow {
             tokens: self.tokens,
             styles: self.styles.styles,
@@ -61,57 +53,6 @@ impl FlowBuilder {
             page_sizes: self.page_sizes,
         }
     }
-
-    /// Records how the producer marks hyphens in a font.
-    fn note_hyphen_mark(&mut self, character: &Char, span: &Span) {
-        let Some(actual_text) = span.actual_text.as_deref() else {
-            return;
-        };
-        let is_soft = actual_text.chars().eq([SOFT_HYPHEN]);
-        let is_hard = matches!(actual_text, "-" | "\u{2010}");
-        let is_hyphen = character.is_line_end_hyphen
-            || matches!(character.text, '-' | '\u{2010}' | SOFT_HYPHEN);
-        if !is_hyphen || !(is_soft || is_hard) {
-            return;
-        }
-        let marks = match self.hyphen_marks_by_font.get_mut(&span.style.font_name) {
-            Some(marks) => marks,
-            None => self
-                .hyphen_marks_by_font
-                .entry(span.style.font_name.clone())
-                .or_default(),
-        };
-        marks.has_marked_soft |= is_soft;
-        marks.has_marked_hard |= is_hard;
-    }
-}
-
-/// Which hyphens of a font the producer names with `ActualText`.
-///
-/// A producer that draws both kinds of hyphen with one glyph can map the
-/// glyph to only one character, and has to name the other kind where it
-/// occurs.
-/// So an unmarked hyphen in a font with marked hard hyphens is soft, and the
-/// other way around.
-#[derive(Default)]
-struct HyphenMarks {
-    has_marked_soft: bool,
-    has_marked_hard: bool,
-}
-
-impl HyphenMarks {
-    fn kind_of_unmarked(&self) -> HyphenKind {
-        match (self.has_marked_soft, self.has_marked_hard) {
-            (false, true) => HyphenKind::Soft,
-            (true, false) => HyphenKind::Hard,
-            _ => HyphenKind::Unknown,
-        }
-    }
-}
-
-struct UnmarkedHyphen {
-    token_index: usize,
-    font_name: String,
 }
 
 /// A hyphen that ends the current run and the line.
@@ -164,19 +105,12 @@ impl PageTokenizer<'_> {
     fn add_char(&mut self, character: &Char) {
         let page = self.page;
         let span = &page.spans[character.span];
-        self.builder.note_hyphen_mark(character, span);
+        self.builder.hyphen_marks.note(span);
 
         if character.is_line_end_hyphen && !self.run.is_empty() {
-            let marked_kind = span.actual_text.as_deref().map(|actual_text| {
-                if actual_text.chars().eq([SOFT_HYPHEN]) {
-                    HyphenKind::Soft
-                } else {
-                    HyphenKind::Hard
-                }
-            });
             self.end_run(Some(RunEndHyphen {
                 character: *character,
-                marked_kind,
+                marked_kind: hyphen_marks::marked_kind(span),
             }));
             self.line_index += 1;
             return;
@@ -255,10 +189,7 @@ impl PageTokenizer<'_> {
         });
         if hyphen.marked_kind.is_none() {
             let span = &self.page.spans[hyphen.character.span];
-            self.builder.unmarked_hyphens.push(UnmarkedHyphen {
-                token_index,
-                font_name: span.style.font_name.clone(),
-            });
+            self.builder.hyphen_marks.note_unmarked(token_index, span);
         }
     }
 
@@ -298,13 +229,22 @@ type StyleKey = (String, u32, Option<u16>, bool, Color, u32);
 
 impl StyleTable {
     fn intern(&mut self, style: &Style) -> usize {
+        // Naming every field keeps the key in step with `Style`.
+        let Style {
+            font_name,
+            font_size,
+            font_weight,
+            is_italic,
+            fill_color,
+            rotation_degrees,
+        } = style;
         let key = (
-            style.font_name.clone(),
-            style.font_size.to_bits(),
-            style.font_weight,
-            style.is_italic,
-            style.fill_color,
-            style.rotation_degrees.to_bits(),
+            font_name.clone(),
+            font_size.to_bits(),
+            *font_weight,
+            *is_italic,
+            *fill_color,
+            rotation_degrees.to_bits(),
         );
         *self.index_by_key.entry(key).or_insert_with(|| {
             self.styles.push(style.clone());

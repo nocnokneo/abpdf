@@ -334,3 +334,14 @@ fn words_of_every_flow_decide_about_a_hyphen_of_unknown_kind() {
     let [broken, _] = prepare([broken, whole], &Filters::default());
     assert_eq!(texts(&broken), ["well", "-", "known"]);
 }
+
+#[test]
+fn hyphen_whose_mark_names_other_text_counts_as_unmarked() {
+    let page = PageBuilder::new()
+        .text("inter")
+        .actual_text("other")
+        .line_end_hyphen()
+        .body()
+        .text("national");
+    assert_eq!(texts(&flow_of([page])), ["international"]);
+}

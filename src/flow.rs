@@ -1,6 +1,7 @@
 //! The text of a document as one flow of tokens, across page boundaries.
 
 mod builder;
+mod hyphen_marks;
 mod join;
 #[cfg(test)]
 mod tests;
