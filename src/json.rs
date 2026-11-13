@@ -50,8 +50,8 @@ fn change_record(change: &Change) -> ChangeRecord<'_> {
             ChangeKind::Deleted => "deleted",
             ChangeKind::Replaced => "replaced",
         },
-        old: side_record(&change.old),
-        new: side_record(&change.new),
+        old: side_record(&change.sides.old),
+        new: side_record(&change.sides.new),
     }
 }
 

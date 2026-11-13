@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use std::{env, fs};
 
+use abpdf::BySide;
 use abpdf::flow::Flow;
 use abpdf::reader::pdfium::PdfiumReader;
 use abpdf::redline::{self, Mark, MarkStyle, Redline, Rgb, Sheet, SheetPage};
@@ -34,8 +35,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut redline = Redline::default();
     loop {
         let sheet = Sheet {
-            old: old_pages.next(),
-            new: new_pages.next(),
+            pages: BySide {
+                old: old_pages.next(),
+                new: new_pages.next(),
+            },
             ..Sheet::default()
         };
         if sheet == Sheet::default() {
@@ -43,7 +46,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         redline.sheets.push(sheet);
     }
-    let output = redline::write(&redline, old_pdf.clone(), new_pdf.clone())?;
+    let pdfs = BySide {
+        old: old_pdf.clone(),
+        new: new_pdf.clone(),
+    };
+    let output = redline::write(&redline, pdfs)?;
     let written = Instant::now();
     fs::write(output_path, &output)?;
 

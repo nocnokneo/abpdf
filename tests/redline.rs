@@ -4,7 +4,6 @@ mod common;
 
 use std::sync::Arc;
 
-use abpdf::Side;
 use abpdf::flow::Flow;
 use abpdf::geometry::{Rect, Size};
 use abpdf::reader::Reader;
@@ -12,9 +11,10 @@ use abpdf::reader::pdfium::PdfiumReader;
 use abpdf::redline::{
     self, Mark, MarkStyle, Redline, Rgb, Sheet, SheetLayout, SheetPage, WriteError,
 };
+use abpdf::{BySide, Side};
 use pdf_writer::{Content, Finish, Name, Pdf, Ref, Str};
 
-use common::{corpus, flow_of, texts, token};
+use common::{both, corpus, flow_of, texts, token};
 
 /// How far a position may be from where it is expected, in points.
 const TOLERANCE: f32 = 0.05;
@@ -97,11 +97,22 @@ fn unmarked_page(page_index: usize) -> SheetPage {
 fn first_new_page() -> Redline {
     Redline {
         sheets: vec![Sheet {
-            new: Some(unmarked_page(0)),
+            pages: BySide {
+                old: None,
+                new: Some(unmarked_page(0)),
+            },
             ..Sheet::default()
         }],
         ..Redline::default()
     }
+}
+
+/// The layout of a sheet that shows a new page of this size and no old one.
+fn layout_of_new_page(size: Size) -> SheetLayout {
+    SheetLayout::new(BySide {
+        old: None,
+        new: Some(size),
+    })
 }
 
 fn assert_close(actual: Rect, expected: Rect, context: &str) {
@@ -125,10 +136,10 @@ fn assert_marks_land_on_tokens(setup: PageSetup) {
     let source_flow = flow_of(source.clone());
     let page_size = source_flow.page_sizes[0];
 
-    let output = redline::write(&first_new_page(), source.clone(), source).expect(&context);
+    let output = redline::write(&first_new_page(), both(source)).expect(&context);
     let sheet_flow = flow_of(Arc::new(output));
 
-    let layout = SheetLayout::new(None, Some(page_size));
+    let layout = layout_of_new_page(page_size);
     assert_eq!(sheet_flow.page_sizes, [layout.size], "{context}");
     assert_eq!(
         texts(&sheet_flow.tokens),
@@ -227,14 +238,16 @@ fn text_of_embedded_pages_stays_text() {
     let redline = Redline {
         sheets: (0..page_count)
             .map(|page_index| Sheet {
-                old: Some(unmarked_page(page_index)),
+                pages: BySide {
+                    old: Some(unmarked_page(page_index)),
+                    new: None,
+                },
                 ..Sheet::default()
             })
             .collect(),
         ..Redline::default()
     };
-    let output =
-        redline::write(&redline, pdf.clone(), pdf.clone()).expect("the redline is written");
+    let output = redline::write(&redline, both(pdf.clone())).expect("the redline is written");
 
     let read_all = |pdf| {
         let reader = PdfiumReader::open(pdf).expect("the PDF opens");
@@ -248,18 +261,16 @@ fn text_of_embedded_pages_stays_text() {
 fn label_is_written_above_its_page() {
     let source = single_page_pdf(PageSetup::default());
     let mut redline = first_new_page();
-    redline.sheets[0].new.as_mut().unwrap().label = "Label".to_owned();
-    let output = redline::write(&redline, source.clone(), source).expect("the redline is written");
+    redline.sheets[0].pages.new.as_mut().unwrap().label = "Label".to_owned();
+    let output = redline::write(&redline, both(source)).expect("the redline is written");
 
     let flow = flow_of(Arc::new(output));
-    let layout = SheetLayout::new(
-        None,
-        Some(Size {
-            width: 300.0,
-            height: 400.0,
-        }),
-    );
-    let frame = layout.frame(Side::New);
+    let frame = layout_of_new_page(Size {
+        width: 300.0,
+        height: 400.0,
+    })
+    .frames
+    .new;
     let label = token(&flow, "Label").fragments[0].bounds;
     assert!((label.left - frame.left).abs() < 1.0, "{label:?}");
     assert!(label.bottom < frame.top, "{label:?}");
@@ -267,7 +278,10 @@ fn label_is_written_above_its_page() {
 
 #[test]
 fn same_input_gives_the_same_bytes() {
-    let (old, new) = (corpus("reading-tagged.pdf"), corpus("reading-untagged.pdf"));
+    let pdfs = BySide::from_fn(|side| match side {
+        Side::Old => corpus("reading-tagged.pdf"),
+        Side::New => corpus("reading-untagged.pdf"),
+    });
     let mark = Mark {
         bounds: Rect {
             left: 40.0,
@@ -292,15 +306,16 @@ fn same_input_gives_the_same_bytes() {
     let redline = Redline {
         sheets: (0..4)
             .map(|page_index| Sheet {
-                old: Some(page(page_index)),
-                new: Some(page(3 - page_index)),
+                pages: BySide {
+                    old: Some(page(page_index)),
+                    new: Some(page(3 - page_index)),
+                },
                 ..Sheet::default()
             })
             .collect(),
         ..Redline::default()
     };
-    let write =
-        || redline::write(&redline, old.clone(), new.clone()).expect("the redline is written");
+    let write = || redline::write(&redline, pdfs.clone()).expect("the redline is written");
     assert_eq!(write(), write());
 }
 
@@ -311,8 +326,8 @@ fn redline_is_written_in_the_pdf_version_that_its_sources_need() {
             pdf_version,
             ..PageSetup::default()
         });
-        let output = redline::write(&first_new_page(), source.clone(), source)
-            .expect("the redline is written");
+        let output =
+            redline::write(&first_new_page(), both(source)).expect("the redline is written");
         String::from_utf8_lossy(&output[..8]).into_owned()
     };
     assert_eq!(version_of(None), "%PDF-1.7");
@@ -325,12 +340,15 @@ fn page_that_a_source_does_not_have_is_an_error() {
     let source = single_page_pdf(PageSetup::default());
     let redline = Redline {
         sheets: vec![Sheet {
-            old: Some(unmarked_page(1)),
+            pages: BySide {
+                old: Some(unmarked_page(1)),
+                new: None,
+            },
             ..Sheet::default()
         }],
         ..Redline::default()
     };
-    let result = redline::write(&redline, source.clone(), source);
+    let result = redline::write(&redline, both(source));
     assert!(matches!(
         result,
         Err(WriteError::NoSuchPage {
@@ -342,8 +360,11 @@ fn page_that_a_source_does_not_have_is_an_error() {
 
 #[test]
 fn source_that_is_not_a_pdf_is_an_error() {
-    let source = single_page_pdf(PageSetup::default());
-    let result = redline::write(&Redline::default(), source, Arc::new(b"not a PDF".to_vec()));
+    let pdfs = BySide {
+        old: single_page_pdf(PageSetup::default()),
+        new: Arc::new(b"not a PDF".to_vec()),
+    };
+    let result = redline::write(&Redline::default(), pdfs);
     assert!(matches!(
         result,
         Err(WriteError::UnreadableSource(Side::New))

@@ -1,23 +1,17 @@
 //! Deciding what the redline of a comparison shows.
 
-use std::collections::BTreeSet;
-
 use super::{Connector, Mark, MarkStyle, Redline, Rgb, Sheet, SheetPage, Span, Summary};
 use super::{SummaryEntry, Target};
-use crate::Side;
-use crate::change::{Change, Comparison};
+use crate::change::{Change, ChangeSide, Comparison};
+use crate::{BySide, Side};
 
 impl Redline {
     /// The redline of a comparison: a summary, and a sheet for every pair of
     /// pages that shows a change.
     ///
     /// The names are what the documents are called on the sheets.
-    pub fn of(comparison: &Comparison, old_name: &str, new_name: &str) -> Self {
-        let planner = Planner {
-            comparison,
-            old_name,
-            new_name,
-        };
+    pub fn of(comparison: &Comparison, names: BySide<&str>) -> Self {
+        let planner = Planner { comparison, names };
         let page_pairs = planner.page_pairs();
         let mut sheets: Vec<Sheet> = page_pairs.iter().map(|pair| planner.sheet(pair)).collect();
         planner.note_unchanged_pages(&mut sheets);
@@ -27,14 +21,13 @@ impl Redline {
             .iter()
             .map(|change| SummaryEntry {
                 location: change.location(),
-                old_text: change.old.text.clone(),
-                new_text: change.new.text.clone(),
+                texts: change.sides.as_ref().map(|side| side.text.clone()),
                 target: target_of(change, &page_pairs),
             })
             .collect();
         Self {
             summary: Some(Summary {
-                title: format!("{old_name} → {new_name}"),
+                title: format!("{} → {}", names.old, names.new),
                 entries,
             }),
             sheets,
@@ -42,29 +35,17 @@ impl Redline {
     }
 }
 
-/// The pages that a sheet shows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct PagePair {
-    // The new page comes first so that sheets are in the order of the new
-    // document.
-    new_page_index: usize,
-    old_page_index: usize,
-}
+/// The indices of the pages that a sheet shows.
+type PagePair = BySide<usize>;
 
-impl PagePair {
-    /// The pages on which the two sides of a change start.
-    fn of_first_pages(change: &Change) -> Self {
-        Self {
-            old_page_index: change.old.areas[0].page_index,
-            new_page_index: change.new.areas[0].page_index,
-        }
-    }
+/// What sheets are sorted by: they are in the order of the new document.
+fn sheet_order(pair: &PagePair) -> (usize, usize) {
+    (pair.new, pair.old)
 }
 
 struct Planner<'a> {
     comparison: &'a Comparison,
-    old_name: &'a str,
-    new_name: &'a str,
+    names: BySide<&'a str>,
 }
 
 impl Planner<'_> {
@@ -74,18 +55,20 @@ impl Planner<'_> {
     /// A change that is on several pages pairs them in order, and repeats the
     /// last page of the side that has fewer.
     fn page_pairs(&self) -> Vec<PagePair> {
-        let mut pairs = BTreeSet::new();
+        let mut pairs: Vec<PagePair> = Vec::new();
         for change in &self.comparison.changes {
-            let old_pages = change.old.page_indices();
-            let new_pages = change.new.page_indices();
-            for position in 0..old_pages.len().max(new_pages.len()) {
-                pairs.insert(PagePair {
-                    old_page_index: old_pages[position.min(old_pages.len() - 1)],
-                    new_page_index: new_pages[position.min(new_pages.len() - 1)],
-                });
+            let pages = change.sides.as_ref().map(ChangeSide::page_indices);
+            for position in 0..pages.old.len().max(pages.new.len()) {
+                pairs.push(
+                    pages
+                        .as_ref()
+                        .map(|pages| pages[position.min(pages.len() - 1)]),
+                );
             }
         }
-        pairs.into_iter().collect()
+        pairs.sort_by_key(sheet_order);
+        pairs.dedup();
+        pairs
     }
 
     fn sheet(&self, pair: &PagePair) -> Sheet {
@@ -95,16 +78,18 @@ impl Planner<'_> {
             .iter()
             .enumerate()
             .filter_map(|(index, change)| {
+                let span = |side| span_on(change, side, pair[side]);
                 Some(Connector {
                     label: (index + 1).to_string(),
-                    old: span_on(change, Side::Old, pair.old_page_index)?,
-                    new: span_on(change, Side::New, pair.new_page_index)?,
+                    spans: BySide {
+                        old: span(Side::Old)?,
+                        new: span(Side::New)?,
+                    },
                 })
             })
             .collect();
         Sheet {
-            old: self.sheet_page(Side::Old, pair.old_page_index),
-            new: self.sheet_page(Side::New, pair.new_page_index),
+            pages: BySide::from_fn(|side| self.sheet_page(side, pair[side])),
             connectors,
             note_above: None,
             note_below: None,
@@ -115,18 +100,15 @@ impl Planner<'_> {
     /// `None` if the document has no such page, which is the case for the
     /// page that a change is located on in a document without pages.
     fn sheet_page(&self, side: Side, page_index: usize) -> Option<SheetPage> {
-        let (name, flow) = match side {
-            Side::Old => (self.old_name, &self.comparison.old),
-            Side::New => (self.new_name, &self.comparison.new),
-        };
-        let page_count = flow.page_sizes.len();
+        let name = self.names[side];
+        let page_count = self.comparison.flows[side].page_sizes.len();
         if page_index >= page_count {
             return None;
         }
         let mut marks = Vec::new();
         for change in &self.comparison.changes {
-            let has_text = !change.side(side).text.is_empty();
-            let areas = change.side(side).areas.iter();
+            let has_text = !change.sides[side].text.is_empty();
+            let areas = change.sides[side].areas.iter();
             marks.extend(
                 areas
                     .filter(|area| area.page_index == page_index)
@@ -153,21 +135,21 @@ impl Planner<'_> {
     fn note_unchanged_pages(&self, sheets: &mut [Sheet]) {
         let mut next_page_index = 0;
         for sheet in sheets.iter_mut() {
-            let Some(page) = &sheet.new else {
+            let Some(page) = &sheet.pages.new else {
                 continue;
             };
             sheet.note_above = self.unchanged_note(next_page_index, page.page_index);
             next_page_index = page.page_index + 1;
         }
         if let Some(last) = sheets.last_mut() {
-            let page_count = self.comparison.new.page_sizes.len();
+            let page_count = self.comparison.flows.new.page_sizes.len();
             last.note_below = self.unchanged_note(next_page_index, page_count);
         }
     }
 
     /// The note for the pages from `first_page_index` up to `end_page_index`.
     fn unchanged_note(&self, first_page_index: usize, end_page_index: usize) -> Option<String> {
-        let name = self.new_name;
+        let name = self.names.new;
         let (first, last) = (first_page_index + 1, end_page_index);
         match last.checked_sub(first)? {
             0 => Some(format!("Page {first} of {name} has no differences")),
@@ -181,8 +163,8 @@ impl Planner<'_> {
 /// The side of a change that has no text is marked in the color of the other.
 fn color_of(change: &Change, side: Side) -> Rgb {
     let side_with_text = match side {
-        Side::Old if change.old.text.is_empty() => Side::New,
-        Side::New if change.new.text.is_empty() => Side::Old,
+        Side::Old if change.sides.old.text.is_empty() => Side::New,
+        Side::New if change.sides.new.text.is_empty() => Side::Old,
         side => side,
     };
     match side_with_text {
@@ -193,7 +175,7 @@ fn color_of(change: &Change, side: Side) -> Rgb {
 
 /// The extent of what a change has on a page of one side, if anything.
 fn span_on(change: &Change, side: Side, page_index: usize) -> Option<Span> {
-    let areas = change.side(side).areas.iter();
+    let areas = change.sides[side].areas.iter();
     areas
         .filter(|area| area.page_index == page_index)
         .map(|area| Span {
@@ -209,11 +191,11 @@ fn span_on(change: &Change, side: Side, page_index: usize) -> Option<Span> {
 /// Where to look for a change: on the sheet of the pages it starts on, which
 /// is the first sheet that shows both of its sides.
 fn target_of(change: &Change, page_pairs: &[PagePair]) -> Target {
-    let first_pages = PagePair::of_first_pages(change);
+    let first_pages = change.sides.as_ref().map(|side| side.areas[0].page_index);
     let sheet_index = page_pairs
-        .binary_search(&first_pages)
+        .binary_search_by_key(&sheet_order(&first_pages), sheet_order)
         .expect("every change has a sheet for its first pages");
-    let span = span_on(change, Side::New, first_pages.new_page_index)
+    let span = span_on(change, Side::New, first_pages.new)
         .expect("a change has an area on its first page");
     Target {
         sheet_index,
@@ -230,14 +212,18 @@ mod tests {
     /// The redline of two documents, given as the text of each of their pages.
     fn redline(old_pages: &[impl AsRef<str>], new_pages: &[impl AsRef<str>]) -> Redline {
         let comparison = comparison_of_pages(old_pages, new_pages);
-        Redline::of(&comparison, "old.pdf", "new.pdf")
+        let names = BySide {
+            old: "old.pdf",
+            new: "new.pdf",
+        };
+        Redline::of(&comparison, names)
     }
 
     fn shown_pages(redline: &Redline) -> Vec<(Option<usize>, Option<usize>)> {
         let page_index = |page: &Option<SheetPage>| page.as_ref().map(|page| page.page_index);
         let sheets = redline.sheets.iter();
         sheets
-            .map(|sheet| (page_index(&sheet.old), page_index(&sheet.new)))
+            .map(|sheet| (page_index(&sheet.pages.old), page_index(&sheet.pages.new)))
             .collect()
     }
 
@@ -271,11 +257,11 @@ mod tests {
             style: MarkStyle::Highlight,
         };
         assert_eq!(
-            sheet.old.as_ref().unwrap().marks,
+            sheet.pages.old.as_ref().unwrap().marks,
             [highlight(cells(5..8), Rgb::REMOVED)]
         );
         assert_eq!(
-            sheet.new.as_ref().unwrap().marks,
+            sheet.pages.new.as_ref().unwrap().marks,
             [highlight(cells(5..10), Rgb::ADDED)]
         );
         let line = Span {
@@ -286,8 +272,10 @@ mod tests {
             sheet.connectors,
             [Connector {
                 label: "1".to_owned(),
-                old: line,
-                new: line,
+                spans: BySide {
+                    old: line,
+                    new: line,
+                },
             }]
         );
     }
@@ -295,7 +283,7 @@ mod tests {
     #[test]
     fn side_without_text_gets_a_caret_in_the_color_of_the_other_side() {
         let inserted = redline(&["keep"], &["keep more"]);
-        let old_marks = &inserted.sheets[0].old.as_ref().unwrap().marks;
+        let old_marks = &inserted.sheets[0].pages.old.as_ref().unwrap().marks;
         assert_eq!(
             old_marks.as_slice(),
             [Mark {
@@ -306,7 +294,7 @@ mod tests {
         );
 
         let deleted = redline(&["keep more"], &["keep"]);
-        let new_marks = &deleted.sheets[0].new.as_ref().unwrap().marks;
+        let new_marks = &deleted.sheets[0].pages.new.as_ref().unwrap().marks;
         assert_eq!(new_marks[0].color, Rgb::REMOVED);
         assert_eq!(new_marks[0].style, MarkStyle::Caret);
     }
@@ -317,8 +305,14 @@ mod tests {
         let new = ["unchanged opening", "an added page of text", "this was new"];
         let redline = redline(&old, &new);
         let sheet = redline.sheets.last().unwrap();
-        assert_eq!(sheet.old.as_ref().unwrap().label, "old.pdf — page 2 of 2");
-        assert_eq!(sheet.new.as_ref().unwrap().label, "new.pdf — page 3 of 3");
+        assert_eq!(
+            sheet.pages.old.as_ref().unwrap().label,
+            "old.pdf — page 2 of 2"
+        );
+        assert_eq!(
+            sheet.pages.new.as_ref().unwrap().label,
+            "new.pdf — page 3 of 3"
+        );
     }
 
     #[test]
@@ -410,8 +404,10 @@ mod tests {
             entries(&redline),
             [SummaryEntry {
                 location: "old p. 2 / new p. 2".to_owned(),
-                old_text: "old".to_owned(),
-                new_text: "new".to_owned(),
+                texts: BySide {
+                    old: "old".to_owned(),
+                    new: "new".to_owned(),
+                },
                 target: Target {
                     sheet_index: 0,
                     top: LINE_PITCH,

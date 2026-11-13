@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use abpdf::BySide;
 use abpdf::change::Comparison;
 use abpdf::filter::Filters;
 use abpdf::flow::{self, Flow, Token};
@@ -37,19 +38,30 @@ pub fn flow_of(pdf: Arc<Vec<u8>>) -> Flow {
     flow
 }
 
-pub fn compare(old_pdf: Arc<Vec<u8>>, new_pdf: Arc<Vec<u8>>, filters: &Filters) -> Comparison {
-    Comparison::of(raw_flow_of(old_pdf), raw_flow_of(new_pdf), filters)
+/// The same value for both documents.
+pub fn both<T: Clone>(value: T) -> BySide<T> {
+    BySide {
+        old: value.clone(),
+        new: value,
+    }
+}
+
+pub fn compare(pdfs: BySide<Arc<Vec<u8>>>, filters: &Filters) -> Comparison {
+    Comparison::of(pdfs.map(raw_flow_of), filters)
 }
 
 /// The comparison of two PDFs and the redline that shows it, as a PDF.
 pub fn compare_and_redline(
-    old_pdf: Arc<Vec<u8>>,
-    new_pdf: Arc<Vec<u8>>,
+    pdfs: BySide<Arc<Vec<u8>>>,
     filters: &Filters,
 ) -> (Comparison, Redline, Vec<u8>) {
-    let comparison = compare(old_pdf.clone(), new_pdf.clone(), filters);
-    let redline = Redline::of(&comparison, "old.pdf", "new.pdf");
-    let pdf = redline::write(&redline, old_pdf, new_pdf).expect("the redline is written");
+    let comparison = compare(pdfs.clone(), filters);
+    let names = BySide {
+        old: "old.pdf",
+        new: "new.pdf",
+    };
+    let redline = Redline::of(&comparison, names);
+    let pdf = redline::write(&redline, pdfs).expect("the redline is written");
     (comparison, redline, pdf)
 }
 

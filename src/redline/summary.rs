@@ -8,6 +8,7 @@ use krilla::surface::Surface;
 
 use super::text::TextFont;
 use super::{Rgb, Summary, SummaryEntry};
+use crate::BySide;
 use crate::excerpt::shortened;
 use crate::geometry::Size;
 
@@ -84,8 +85,8 @@ fn height_of(entry: &SummaryEntry) -> f32 {
 /// that has text.
 fn lines_of(entry: &SummaryEntry) -> impl Iterator<Item = (&'static str, Rgb, &str)> {
     let lines = [
-        ("−", Rgb::REMOVED, entry.old_text.as_str()),
-        ("+", Rgb::ADDED, entry.new_text.as_str()),
+        ("−", Rgb::REMOVED, entry.texts.old.as_str()),
+        ("+", Rgb::ADDED, entry.texts.new.as_str()),
     ];
     lines.into_iter().filter(|(_, _, text)| !text.is_empty())
 }
@@ -189,8 +190,8 @@ fn counts_line(change_count: usize, sheet_count: usize) -> String {
 
 /// The title of the bookmark of the entry at `index`.
 pub(super) fn bookmark_title(index: usize, entry: &SummaryEntry) -> String {
-    let old = shortened(&entry.old_text, BOOKMARK_TEXT_CHARS);
-    let new = shortened(&entry.new_text, BOOKMARK_TEXT_CHARS);
+    let texts = entry.texts.as_ref();
+    let BySide { old, new } = texts.map(|text| shortened(text, BOOKMARK_TEXT_CHARS));
     let texts = match (old.is_empty(), new.is_empty()) {
         (true, _) => format!("+ {new}"),
         (_, true) => format!("− {old}"),
@@ -207,8 +208,10 @@ mod tests {
     fn entry(old_text: &str, new_text: &str) -> SummaryEntry {
         SummaryEntry {
             location: "old p. 1 / new p. 1".to_owned(),
-            old_text: old_text.to_owned(),
-            new_text: new_text.to_owned(),
+            texts: BySide {
+                old: old_text.to_owned(),
+                new: new_text.to_owned(),
+            },
             target: Target {
                 sheet_index: 0,
                 top: 0.0,

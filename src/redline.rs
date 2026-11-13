@@ -19,8 +19,8 @@ use krilla::error::KrillaError;
 use krilla::pdf::{Pdf, PdfDocument, PdfError};
 
 pub use self::layout::SheetLayout;
-use crate::Side;
 use crate::geometry::{Rect, Size};
+use crate::{BySide, Side};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Redline {
@@ -40,8 +40,8 @@ pub struct Summary {
 pub struct SummaryEntry {
     /// Where the change is in the documents, for a reader.
     pub location: String,
-    pub old_text: String,
-    pub new_text: String,
+    /// The text that each document has at the change.
+    pub texts: BySide<String>,
     /// Where the sheets show the change, which the entry links to.
     pub target: Target,
 }
@@ -57,22 +57,14 @@ pub struct Target {
 /// One page of the redline.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Sheet {
-    pub old: Option<SheetPage>,
-    pub new: Option<SheetPage>,
+    /// The page of each document that the sheet shows, if any: the old one
+    /// on the left and the new one on the right.
+    pub pages: BySide<Option<SheetPage>>,
     pub connectors: Vec<Connector>,
     /// A line of text above the pages.
     pub note_above: Option<String>,
     /// A line of text below the pages.
     pub note_below: Option<String>,
-}
-
-impl Sheet {
-    pub fn page(&self, side: Side) -> Option<&SheetPage> {
-        match side {
-            Side::Old => self.old.as_ref(),
-            Side::New => self.new.as_ref(),
-        }
-    }
 }
 
 /// A source page on a sheet.
@@ -107,8 +99,8 @@ pub enum MarkStyle {
 pub struct Connector {
     /// Written in the middle of the band.
     pub label: String,
-    pub old: Span,
-    pub new: Span,
+    /// The extent of the change on the page of each side.
+    pub spans: BySide<Span>,
 }
 
 /// A vertical extent on a page, in distances from its top edge.
@@ -146,20 +138,17 @@ pub enum WriteError {
     Serialization(#[from] KrillaError),
 }
 
-/// Renders `redline` over the pages of the two source documents.
+/// Renders `redline` over the pages of the two source documents, which
+/// `pdfs` holds.
 ///
 /// The output depends on nothing but the arguments: the same input gives the
 /// same bytes.
-pub fn write(
-    redline: &Redline,
-    old_pdf: Arc<Vec<u8>>,
-    new_pdf: Arc<Vec<u8>>,
-) -> Result<Vec<u8>, WriteError> {
-    let sources = Sources {
-        old: Source::load(Side::Old, old_pdf)?,
-        new: Source::load(Side::New, new_pdf)?,
+pub fn write(redline: &Redline, pdfs: BySide<Arc<Vec<u8>>>) -> Result<Vec<u8>, WriteError> {
+    let sources = BySide {
+        old: Source::load(Side::Old, pdfs.old)?,
+        new: Source::load(Side::New, pdfs.new)?,
     };
-    sources.check_pages_exist(redline)?;
+    check_pages_exist(redline, &sources)?;
 
     let default_version = krilla::configure::PdfVersion::default();
     let rendered = match render::render(redline, &sources, default_version) {
@@ -173,35 +162,21 @@ pub fn write(
     Ok(rendered?)
 }
 
-struct Sources {
-    old: Source,
-    new: Source,
-}
-
-impl Sources {
-    fn get(&self, side: Side) -> &Source {
-        match side {
-            Side::Old => &self.old,
-            Side::New => &self.new,
-        }
-    }
-
-    fn check_pages_exist(&self, redline: &Redline) -> Result<(), WriteError> {
-        for sheet in &redline.sheets {
-            for side in Side::BOTH {
-                let missing_page = sheet
-                    .page(side)
-                    .filter(|page| self.get(side).page_size(page.page_index).is_none());
-                if let Some(page) = missing_page {
-                    return Err(WriteError::NoSuchPage {
-                        side,
-                        page_number: page.page_index + 1,
-                    });
-                }
+fn check_pages_exist(redline: &Redline, sources: &BySide<Source>) -> Result<(), WriteError> {
+    for sheet in &redline.sheets {
+        for side in Side::BOTH {
+            let page = sheet.pages[side].as_ref();
+            let missing_page =
+                page.filter(|page| sources[side].page_size(page.page_index).is_none());
+            if let Some(page) = missing_page {
+                return Err(WriteError::NoSuchPage {
+                    side,
+                    page_number: page.page_index + 1,
+                });
             }
         }
-        Ok(())
     }
+    Ok(())
 }
 
 /// A document whose pages are embedded.

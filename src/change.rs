@@ -5,17 +5,17 @@
 use std::borrow::Cow;
 use std::ops::Range;
 
-use crate::Side;
 use crate::diff::{self, Hunk};
 use crate::filter::Filters;
 use crate::flow::{self, Flow, Gap, Token};
 use crate::geometry::Rect;
+use crate::{BySide, Side};
 
 /// Two documents and the changes from the old one to the new one.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Comparison {
-    pub old: Flow,
-    pub new: Flow,
+    /// The documents as they were compared.
+    pub flows: BySide<Flow>,
     /// In the order of the text.
     pub changes: Vec<Change>,
 }
@@ -23,8 +23,7 @@ pub struct Comparison {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Change {
     pub kind: ChangeKind,
-    pub old: ChangeSide,
-    pub new: ChangeSide,
+    pub sides: BySide<ChangeSide>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,34 +56,28 @@ pub struct Area {
 
 impl Comparison {
     /// Compares two flows as [`Flow::read`] returns them.
-    pub fn of(old: Flow, new: Flow, filters: &Filters) -> Self {
-        let [old, new] = flow::prepare([old, new], filters);
-        let (old_compared, new_compared) = (Compared::of(&old), Compared::of(&new));
-        let hunks = diff::diff(&old_compared.keys(), &new_compared.keys());
+    pub fn of(flows: BySide<Flow>, filters: &Filters) -> Self {
+        let [old, new] = flow::prepare([flows.old, flows.new], filters);
+        let flows = BySide { old, new };
+        let compared = flows.as_ref().map(Compared::of);
+        let hunks = diff::diff(&compared.as_ref().map(Compared::keys));
         let changes = hunks
             .iter()
-            .map(|hunk| change_at(hunk, &old_compared, &new_compared))
+            .map(|hunk| change_at(hunk, &compared))
             .collect();
-        Self { old, new, changes }
+        Self { flows, changes }
     }
 }
 
 impl Change {
-    pub fn side(&self, side: Side) -> &ChangeSide {
-        match side {
-            Side::Old => &self.old,
-            Side::New => &self.new,
-        }
-    }
-
     /// The pages on which the two sides start, in words and as a reader
     /// counts them.
     pub fn location(&self) -> String {
-        let first_page_number = |side: &ChangeSide| side.areas[0].page_index + 1;
+        let first_page_number = |side: Side| self.sides[side].areas[0].page_index + 1;
         format!(
             "old p. {} / new p. {}",
-            first_page_number(&self.old),
-            first_page_number(&self.new)
+            first_page_number(Side::Old),
+            first_page_number(Side::New)
         )
     }
 }
@@ -120,7 +113,7 @@ impl<'a> Compared<'a> {
     }
 }
 
-fn change_at(hunk: &Hunk, old: &Compared, new: &Compared) -> Change {
+fn change_at(hunk: &Hunk, compared: &BySide<Compared>) -> Change {
     let kind = match (hunk.old.is_empty(), hunk.new.is_empty()) {
         (true, _) => ChangeKind::Inserted,
         (_, true) => ChangeKind::Deleted,
@@ -128,8 +121,7 @@ fn change_at(hunk: &Hunk, old: &Compared, new: &Compared) -> Change {
     };
     Change {
         kind,
-        old: change_side(old, &hunk.old),
-        new: change_side(new, &hunk.new),
+        sides: BySide::from_fn(|side| change_side(&compared[side], &hunk[side])),
     }
 }
 
@@ -223,7 +215,11 @@ mod tests {
         new: impl IntoIterator<Item = PageBuilder>,
         filters: &Filters,
     ) -> Vec<Change> {
-        Comparison::of(raw_flow_of(old), raw_flow_of(new), filters).changes
+        let flows = BySide {
+            old: raw_flow_of(old),
+            new: raw_flow_of(new),
+        };
+        Comparison::of(flows, filters).changes
     }
 
     fn compare(old: &str, new: &str) -> Vec<Change> {
@@ -237,8 +233,8 @@ mod tests {
             .map(|change| {
                 (
                     change.kind,
-                    change.old.text.as_str(),
-                    change.new.text.as_str(),
+                    change.sides.old.text.as_str(),
+                    change.sides.new.text.as_str(),
                 )
             })
             .collect()
@@ -261,19 +257,19 @@ mod tests {
     fn inserted_text_is_only_on_the_new_side() {
         let changes = compare("one three", "one two three");
         assert_eq!(summaries(&changes), [(ChangeKind::Inserted, "", "two")]);
-        assert_eq!(changes[0].new.areas, [cells(0, 0, 4..7)]);
+        assert_eq!(changes[0].sides.new.areas, [cells(0, 0, 4..7)]);
     }
 
     #[test]
     fn side_without_text_is_located_after_the_token_before_it() {
         let changes = compare("one three", "one two three");
-        assert_eq!(changes[0].old.areas, [cells(0, 0, 3..3)]);
+        assert_eq!(changes[0].sides.old.areas, [cells(0, 0, 3..3)]);
     }
 
     #[test]
     fn insertion_before_all_text_is_located_at_the_first_token() {
         let changes = compare("one", "zero one");
-        assert_eq!(changes[0].old.areas, [cells(0, 0, 0..0)]);
+        assert_eq!(changes[0].sides.old.areas, [cells(0, 0, 0..0)]);
     }
 
     #[test]
@@ -313,8 +309,11 @@ mod tests {
     #[test]
     fn change_has_one_area_per_line() {
         let changes = compare("keep old\nwords here", "keep here");
-        assert_eq!(changes[0].old.text, "old words");
-        assert_eq!(changes[0].old.areas, [cells(0, 0, 5..8), cells(0, 1, 0..5)]);
+        assert_eq!(changes[0].sides.old.text, "old words");
+        assert_eq!(
+            changes[0].sides.old.areas,
+            [cells(0, 0, 5..8), cells(0, 1, 0..5)]
+        );
     }
 
     #[test]
@@ -325,8 +324,8 @@ mod tests {
         ];
         let new = [PageBuilder::new().text("keep here")];
         let changes = compare_with(old, new, &Filters::default());
-        assert_eq!(changes[0].old.page_indices(), [0, 1]);
-        assert_eq!(changes[0].new.page_indices(), [0]);
+        assert_eq!(changes[0].sides.old.page_indices(), [0, 1]);
+        assert_eq!(changes[0].sides.new.page_indices(), [0]);
     }
 
     #[test]
@@ -387,6 +386,6 @@ mod tests {
         };
         let changes = compare_with([page("old")], [page("new")], &Filters::default());
         assert_eq!(summaries(&changes), [(ChangeKind::Replaced, "old", "new")]);
-        assert_eq!(changes[0].old.areas, [cells(0, 0, 0..3)]);
+        assert_eq!(changes[0].sides.old.areas, [cells(0, 0, 0..3)]);
     }
 }

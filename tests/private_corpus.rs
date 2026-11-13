@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use std::{env, fs};
 
+use abpdf::BySide;
 use abpdf::profile::Profile;
 
 use common::compare_and_redline;
@@ -50,14 +51,14 @@ fn private_corpus_compares_the_same_every_time() {
 /// The number of changes between the documents in `directory`, and their
 /// redline.
 fn compare(directory: &Path) -> (usize, Vec<u8>) {
-    let read =
-        |file_name: &str| Arc::new(fs::read(directory.join(file_name)).expect("the PDF reads"));
+    let pdfs = BySide::from_fn(|side| {
+        Arc::new(fs::read(directory.join(format!("{side}.pdf"))).expect("the PDF reads"))
+    });
     let profile_path = directory.join("profile.toml");
     let profile = match profile_path.is_file() {
         true => Profile::load(&profile_path).expect("the profile loads"),
         false => Profile::default(),
     };
-    let (comparison, _, redline) =
-        compare_and_redline(read("old.pdf"), read("new.pdf"), &profile.filters);
+    let (comparison, _, redline) = compare_and_redline(pdfs, &profile.filters);
     (comparison.changes.len(), redline)
 }

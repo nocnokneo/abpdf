@@ -13,7 +13,8 @@ const MAX_TEXT_CHARS: usize = 200;
 pub fn write(comparison: &Comparison, mut output: impl Write) -> io::Result<()> {
     for change in &comparison.changes {
         writeln!(output, "@ {}", change.location())?;
-        for (sign, text) in [('-', &change.old.text), ('+', &change.new.text)] {
+        let texts = change.sides.as_ref().map(|side| &side.text);
+        for (sign, text) in [('-', texts.old), ('+', texts.new)] {
             if !text.is_empty() {
                 writeln!(output, "{sign} {}", shortened(text, MAX_TEXT_CHARS))?;
             }

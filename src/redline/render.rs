@@ -14,12 +14,12 @@ use krilla::paint::{Fill, Stroke};
 use krilla::surface::Surface;
 use krilla::{Document, SerializeSettings};
 
+use super::Target;
 use super::summary::{self, SummaryPages};
 use super::text::TextFont;
 use super::{Connector, Mark, MarkStyle, Redline, Rgb, Sheet, SheetLayout, SheetPage, Source};
-use super::{Sources, Target};
-use crate::Side;
 use crate::geometry::Rect;
+use crate::{BySide, Side};
 
 const LABEL_FONT_SIZE: f32 = 9.0;
 const LABEL_COLOR: Rgb = Rgb::new(51, 51, 51);
@@ -46,7 +46,7 @@ const TARGET_HEADROOM: f32 = 40.0;
 
 pub(super) fn render(
     redline: &Redline,
-    sources: &Sources,
+    sources: &BySide<Source>,
     version: PdfVersion,
 ) -> Result<Vec<u8>, KrillaError> {
     let configuration = ConfigurationBuilder::new()
@@ -95,12 +95,11 @@ pub(super) fn render(
     document.finish()
 }
 
-fn layout_of(sheet: &Sheet, sources: &Sources) -> SheetLayout {
-    let page_size = |side| {
-        let page = sheet.page(side)?;
-        sources.get(side).page_size(page.page_index)
-    };
-    SheetLayout::new(page_size(Side::Old), page_size(Side::New))
+fn layout_of(sheet: &Sheet, sources: &BySide<Source>) -> SheetLayout {
+    SheetLayout::new(BySide::from_fn(|side| {
+        let page = sheet.pages[side].as_ref()?;
+        sources[side].page_size(page.page_index)
+    }))
 }
 
 /// The view of the redline that shows `target`, on a sheet that is
@@ -110,7 +109,7 @@ fn destination_of(
     layouts: &[SheetLayout],
     sheet_page_offset: usize,
 ) -> XyzDestination {
-    let frame = layouts[target.sheet_index].frame(Side::New);
+    let frame = layouts[target.sheet_index].frames.new;
     let top = (frame.top + target.top - TARGET_HEADROOM).max(0.0);
     XyzDestination::new(
         sheet_page_offset + target.sheet_index,
@@ -120,7 +119,7 @@ fn destination_of(
 
 fn draw_sheet(
     document: &mut Document,
-    sources: &Sources,
+    sources: &BySide<Source>,
     font: &TextFont,
     sheet: &Sheet,
     layout: &SheetLayout,
@@ -131,9 +130,9 @@ fn draw_sheet(
     let mut surface = page.surface();
 
     for side in Side::BOTH {
-        let frame = layout.frame(side);
-        if let Some(sheet_page) = sheet.page(side) {
-            embed_page(&mut surface, sources.get(side), sheet_page, frame);
+        let frame = layout.frames[side];
+        if let Some(sheet_page) = &sheet.pages[side] {
+            embed_page(&mut surface, &sources[side], sheet_page, frame);
             draw_marks(&mut surface, layout, side, &sheet_page.marks);
             let label_position = (frame.left, layout.label_baseline());
             font.draw(
@@ -149,7 +148,7 @@ fn draw_sheet(
     for connector in &sheet.connectors {
         draw_connector(&mut surface, font, layout, connector);
     }
-    let left = layout.frame(Side::Old).left;
+    let left = layout.frames.old.left;
     let notes = [
         (&sheet.note_above, layout.note_above_baseline()),
         (&sheet.note_below, layout.note_below_baseline()),
@@ -253,10 +252,10 @@ fn draw_connector(
         gutter_right - CONNECTOR_INSET,
     );
     let middle = (left + right) / 2.0;
-    let old_top = layout.frame(Side::Old).top + connector.old.top;
-    let old_bottom = layout.frame(Side::Old).top + connector.old.bottom;
-    let new_top = layout.frame(Side::New).top + connector.new.top;
-    let new_bottom = layout.frame(Side::New).top + connector.new.bottom;
+    let old_top = layout.frames.old.top + connector.spans.old.top;
+    let old_bottom = layout.frames.old.top + connector.spans.old.bottom;
+    let new_top = layout.frames.new.top + connector.spans.new.top;
+    let new_bottom = layout.frames.new.top + connector.spans.new.bottom;
 
     let mut builder = PathBuilder::new();
     builder.move_to(left, old_top);

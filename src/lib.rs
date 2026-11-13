@@ -23,27 +23,8 @@ pub mod listing;
 pub mod profile;
 pub mod reader;
 pub mod redline;
+mod side;
 #[cfg(test)]
 mod testing;
 
-use std::fmt;
-
-/// One of the two documents that are compared.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Side {
-    Old,
-    New,
-}
-
-impl Side {
-    pub const BOTH: [Side; 2] = [Side::Old, Side::New];
-}
-
-impl fmt::Display for Side {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Side::Old => "old",
-            Side::New => "new",
-        })
-    }
-}
+pub use self::side::{BySide, Side};

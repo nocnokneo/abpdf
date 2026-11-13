@@ -2,6 +2,7 @@
 
 use std::ops::Range;
 
+use crate::BySide;
 use crate::change::Comparison;
 use crate::filter::Filters;
 use crate::flow::{Flow, FlowBuilder};
@@ -163,7 +164,11 @@ pub(crate) fn comparison_of_pages(
                 .map(|text| PageBuilder::new().text(text.as_ref())),
         )
     }
-    Comparison::of(flow(old_pages), flow(new_pages), &Filters::default())
+    let flows = BySide {
+        old: flow(old_pages),
+        new: flow(new_pages),
+    };
+    Comparison::of(flows, &Filters::default())
 }
 
 /// The bounds of the cells from `columns` on `line` of a page.

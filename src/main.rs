@@ -10,7 +10,7 @@ use abpdf::profile::Profile;
 use abpdf::reader::ReadError;
 use abpdf::reader::pdfium::PdfiumReader;
 use abpdf::redline::{self, Redline};
-use abpdf::{json, listing};
+use abpdf::{BySide, json, listing};
 use clap::Parser;
 
 /// Compare two revisions of a PDF.
@@ -61,19 +61,26 @@ fn run(arguments: &Arguments) -> Result<bool, String> {
     };
     let (old_pdf, old_flow) = read(&arguments.old)?;
     let (new_pdf, new_flow) = read(&arguments.new)?;
-    let comparison = Comparison::of(old_flow, new_flow, &profile.filters);
+    let pdfs = BySide {
+        old: old_pdf,
+        new: new_pdf,
+    };
+    let flows = BySide {
+        old: old_flow,
+        new: new_flow,
+    };
+    let comparison = Comparison::of(flows, &profile.filters);
 
     if let Some(path) = &arguments.output {
         if arguments.only_if_different && comparison.changes.is_empty() {
             remove_if_present(path)?;
         } else {
-            let redline = Redline::of(
-                &comparison,
-                &file_name(&arguments.old),
-                &file_name(&arguments.new),
-            );
-            let pdf =
-                redline::write(&redline, old_pdf, new_pdf).map_err(|error| error.to_string())?;
+            let names = BySide {
+                old: file_name(&arguments.old),
+                new: file_name(&arguments.new),
+            };
+            let redline = Redline::of(&comparison, names.as_ref().map(String::as_str));
+            let pdf = redline::write(&redline, pdfs).map_err(|error| error.to_string())?;
             fs::write(path, pdf).map_err(|error| in_file(path, error))?;
         }
     }
