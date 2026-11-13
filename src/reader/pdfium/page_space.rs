@@ -2,10 +2,9 @@
 
 use crate::geometry::{Rect, Size};
 
-/// The part of a page that a viewer shows, in PDF user space, where y grows
-/// upward.
+/// A rectangle in PDF user space, where y grows upward.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct VisibleBox {
+pub(super) struct UserSpaceBox {
     pub left: f64,
     pub bottom: f64,
     pub right: f64,
@@ -15,13 +14,14 @@ pub(super) struct VisibleBox {
 /// Maps PDF user space positions on one page to page space.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct PageSpace {
-    visible: VisibleBox,
+    /// The part of the page that a viewer shows.
+    visible: UserSpaceBox,
     clockwise_quarter_turns: u8,
 }
 
 impl PageSpace {
     /// `clockwise_quarter_turns` is the page's `/Rotate` entry divided by 90.
-    pub fn new(visible: VisibleBox, clockwise_quarter_turns: i32) -> Self {
+    pub fn new(visible: UserSpaceBox, clockwise_quarter_turns: i32) -> Self {
         Self {
             visible,
             clockwise_quarter_turns: clockwise_quarter_turns.rem_euclid(4) as u8,
@@ -42,7 +42,7 @@ impl PageSpace {
     }
 
     pub fn point(&self, x: f64, y: f64) -> (f32, f32) {
-        let VisibleBox {
+        let UserSpaceBox {
             left,
             bottom,
             right,
@@ -57,10 +57,12 @@ impl PageSpace {
         (page_x as f32, page_y as f32)
     }
 
-    /// The page space rectangle of the user space rectangle with these edges.
-    pub fn rect(&self, left: f64, bottom: f64, right: f64, top: f64) -> Rect {
-        Rect::bounding([self.point(left, bottom), self.point(right, top)])
-            .expect("two points have bounds")
+    pub fn rect(&self, user_space: UserSpaceBox) -> Rect {
+        let corners = [
+            self.point(user_space.left, user_space.bottom),
+            self.point(user_space.right, user_space.top),
+        ];
+        Rect::bounding(corners).expect("two points have bounds")
     }
 }
 
@@ -69,7 +71,7 @@ mod tests {
     use super::*;
 
     /// A page whose visible box is 200 wide and 300 high, away from the origin.
-    const VISIBLE: VisibleBox = VisibleBox {
+    const VISIBLE: UserSpaceBox = UserSpaceBox {
         left: 10.0,
         bottom: 20.0,
         right: 210.0,
@@ -121,7 +123,12 @@ mod tests {
 
     #[test]
     fn rect_stays_normalized_under_rotation() {
-        let rect = PageSpace::new(VISIBLE, 1).rect(40.0, 270.0, 60.0, 280.0);
+        let rect = PageSpace::new(VISIBLE, 1).rect(UserSpaceBox {
+            left: 40.0,
+            bottom: 270.0,
+            right: 60.0,
+            top: 280.0,
+        });
         assert_eq!(
             rect,
             Rect {
