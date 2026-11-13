@@ -74,6 +74,45 @@ What the prototype gets wrong is the first work list:
 - Punctuation stays attached to words, so `Export` and `Export.` differ as whole words.
 - Words broken at a line end are not rejoined.
 
+## What the spike established
+
+The first step of the [order of work](#order-of-work) settled how positions are measured and what embedding costs, and showed what PDFium gets out of a tagged PDF.
+
+Positions:
+
+- Every position is in page space: the page as a viewer shows it, with the crop box and the rotation applied, measured in PDF units from the top left corner with y growing downward.
+- PDFium reports text in PDF user space, and the page's bounding box and rotation are all it takes to convert that.
+- `krilla` embeds a page upright and starting at its crop box, so a mark at a token's bounds lands on the token.
+  Tests hold this for the four rotations, with and without a crop box away from the origin, by reading the redline back.
+- Neither side applies a page's `UserUnit`, so they agree on such pages too.
+
+Cost, measured on the two revisions of the synthetic manual that `mise run manual` builds, each about 307 pages, 200,000 words and 3.8 MB:
+
+| Stage | Result |
+| -- | -- |
+| Reading both documents into tokens | About 1 second |
+| Writing every page of both, side by side on 307 sheets | 0.5 seconds |
+| Size of those sheets | 3.9 MB |
+
+- The sheets are smaller than the two sources together because fonts and images are embedded once per document and the structure tree is not embedded.
+  From the same manual built without tags, at 1.9 MB per revision, they are 3.7 MB.
+- Marks are not free: an outline around each of the 450,000 tokens adds 8 MB.
+
+Tagged PDFs from Typst:
+
+- Headers, footers, table of contents leaders, repeated table headers and text inside `pdf.artifact` all arrive marked as artifacts.
+- The structure tree gives each token the types of the elements around it, such as `Document/Table/TBody/TR/TD`.
+- PDFium replaces a hyphen that ends a line inside a word with a marker and drops the line break, whether the producer's line breaking added the hyphen or the text has it.
+  Typst draws both kinds with one glyph, which maps to one of them, and names the other kind with `ActualText` wherever it occurs.
+  So the kind of an unmarked hyphen follows from the marked hyphens of its font, and is unknown only in a font that has none.
+- PDFium decodes the `ActualText` of marked content wrongly when it is UTF-16, so abpdf decodes the string's bytes itself.
+
+Stack:
+
+- `pdfium-render` is used for its bindings to PDFium's C interface only.
+  Its own interface does not reach marked content or the structure tree.
+- A page can only be embedded in a PDF of at least its own version, so the redline is PDF 1.7 unless a source is newer.
+
 ## Use what the producer already says
 
 Tagged PDFs carry most of what the filters otherwise have to guess, and abpdf should read the structure tree and marked content whenever a document has them:
@@ -139,8 +178,7 @@ The reader sits behind an interface from the start so that a second implementati
 
 - Two layouts of the same text can extract as different token sequences.
 - PDFium is distributed as a shared library, so until `hayro` can replace it the release is an archive, not one file.
-- The reader and the writer may disagree about page boxes or rotation, which would shift highlights.
-- Embedding hundreds of source pages can make the output large and slow to write.
+- Where the producer does not mark its hyphens, whether a hyphen at a line end belongs to the word is a guess.
 - Comparing vector drawings is noisy.
 - `krilla` does not write comment annotations.
 - `krilla` and `hayro` are young, and PDFium's editing interface is marked experimental.
@@ -148,6 +186,7 @@ The reader sits behind an interface from the start so that a second implementati
 ## Testing
 
 - The test corpus is generated in the repository: Typst sources for an old and a new revision of a synthetic document, each pair exercising named cases (reflow, renumbering, table edits, swapped paragraphs, changed image, changed diagram, style-only change).
+  The PDFs built from the sources are checked in, so the tests need no Typst, and CI checks that they are up to date.
   Nothing confidential or third-party is checked in.
 - Tests assert on the change model, and a few on properties of the output PDF (pages stay vector, text stays extractable, links resolve).
 - Each test pair is compared twice and the outputs must be byte-identical.
@@ -158,6 +197,7 @@ The reader sits behind an interface from the start so that a second implementati
 
 1. Spike: read a tagged and an untagged PDF with PDFium into tokens; embed two pages side by side with `krilla` and draw on them.
    Settle the coordinate system and measure output size on a few hundred pages.
+   Done: see [What the spike established](#what-the-spike-established).
 2. First usable version: continuous text diff, artifact, region and regex filters, side-by-side PDF with connectors, only changed sheets, summary page, JSON, exit status, profile file.
 3. Filter audit overlay, moved blocks, repeated table headers, page pairing.
 4. Figures, images and style changes; table cells.

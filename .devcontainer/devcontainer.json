@@ -1,0 +1,60 @@
+// A place to work on abpdf, for a person at an editor or for an agent
+// session that a script such as t3-devcontainer starts in it.
+{
+	"name": "abpdf",
+	// Pinned to the LTS tag: the floating :ubuntu one can resolve to an interim
+	// release that features have no packages for.
+	"image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+	"remoteUser": "vscode",
+
+	// A name that says more than the container id does, for whatever lists the
+	// container by its hostname. Unset, the expansion is empty, which docker
+	// reads as "use the container id".
+	"runArgs": ["--hostname=${localEnv:DEVCONTAINER_HOSTNAME}"],
+
+	// Mount the workspace at the path it has on the host, so that absolute
+	// paths such as those of git worktrees mean the same on both sides.
+	// ${localWorkspaceFolder} is only a POSIX path when the devcontainer CLI
+	// itself runs on Linux, so on Windows open the repository from WSL.
+	"workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind",
+	"workspaceFolder": "${localWorkspaceFolder}",
+
+	"features": {
+		// Installs the tools that mise.toml pins. See post-create.sh.
+		"ghcr.io/devcontainers-extra/features/mise:1": {},
+		// Lets a server in the container be reached over a tailnet, with no
+		// ports to forward. Inert until someone logs it in.
+		"ghcr.io/tailscale/codespace/tailscale:1": {}
+	},
+
+	"mounts": [
+		// The whole home directory, so that toolchains, the cargo registry,
+		// logins and shell history survive a rebuild. Docker seeds an empty
+		// volume from the image, owner included. Per host user, because
+		// volumes are shared by everyone who uses the docker daemon.
+		"source=abpdf-${localEnv:USER}-home,target=/home/vscode,type=volume"
+	],
+
+	// The mise feature only installs the binary, and `devcontainer exec` runs
+	// no shell that would activate it, so put the shims on PATH here. A shim
+	// also applies the [env] of mise.toml, which is how cargo finds PDFium.
+	// It has to be remoteEnv: containerEnv does not expand ${containerEnv:PATH}.
+	"remoteEnv": {
+		"PATH": "/home/vscode/.local/share/mise/shims:${containerEnv:PATH}"
+	},
+
+	"postCreateCommand": "./.devcontainer/post-create.sh",
+	// Keeps anything that waits for the container from starting before the
+	// tools are installed.
+	"waitFor": "postCreateCommand",
+
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"rust-lang.rust-analyzer",
+				"tamasfe.even-better-toml",
+				"myriad-dreamin.tinymist"
+			]
+		}
+	}
+}
