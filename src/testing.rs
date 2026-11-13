@@ -1,5 +1,9 @@
 //! Pages made by hand, for tests that need no PDF.
 
+use std::ops::Range;
+
+use crate::change::Comparison;
+use crate::filter::Filters;
 use crate::flow::{Flow, FlowBuilder};
 use crate::geometry::{Rect, Size};
 use crate::reader::{Char, Color, Page, Span, Style, TextItem};
@@ -139,6 +143,38 @@ pub(crate) fn raw_flow_of(pages: impl IntoIterator<Item = PageBuilder>) -> Flow 
         builder.add_page(&page.build());
     }
     builder.finish()
+}
+
+/// The comparison of two documents of one page each, with nothing left out.
+pub(crate) fn comparison_of(old_text: &str, new_text: &str) -> Comparison {
+    comparison_of_pages(&[old_text], &[new_text])
+}
+
+/// The comparison of two documents, given as the text of each of their
+/// pages, with nothing left out.
+pub(crate) fn comparison_of_pages(
+    old_pages: &[impl AsRef<str>],
+    new_pages: &[impl AsRef<str>],
+) -> Comparison {
+    fn flow(pages: &[impl AsRef<str>]) -> Flow {
+        raw_flow_of(
+            pages
+                .iter()
+                .map(|text| PageBuilder::new().text(text.as_ref())),
+        )
+    }
+    Comparison::of(flow(old_pages), flow(new_pages), &Filters::default())
+}
+
+/// The bounds of the cells from `columns` on `line` of a page.
+pub(crate) fn cell_bounds(line: usize, columns: Range<usize>) -> Rect {
+    let top = line as f32 * LINE_PITCH;
+    Rect {
+        left: columns.start as f32 * CELL_WIDTH,
+        top,
+        right: columns.end as f32 * CELL_WIDTH,
+        bottom: top + CELL_HEIGHT,
+    }
 }
 
 pub(crate) fn texts(flow: &Flow) -> Vec<&str> {

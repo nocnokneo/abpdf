@@ -61,7 +61,7 @@ fn run(arguments: &Arguments) -> Result<bool, String> {
     };
     let (old_pdf, old_flow) = read(&arguments.old)?;
     let (new_pdf, new_flow) = read(&arguments.new)?;
-    let comparison = Comparison::of_flows(old_flow, new_flow, &profile.filters);
+    let comparison = Comparison::of(old_flow, new_flow, &profile.filters);
 
     if let Some(path) = &arguments.output {
         if arguments.only_if_different && comparison.changes.is_empty() {

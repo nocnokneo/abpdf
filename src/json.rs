@@ -83,14 +83,11 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
-    use crate::filter::Filters;
-    use crate::testing::{PageBuilder, raw_flow_of};
+    use crate::testing::comparison_of;
 
     fn report(old: &str, new: &str) -> Value {
-        let flow = |text| raw_flow_of([PageBuilder::new().text(text)]);
-        let comparison = Comparison::of_flows(flow(old), flow(new), &Filters::default());
         let mut output = Vec::new();
-        write(&comparison, &mut output).unwrap();
+        write(&comparison_of(old, new), &mut output).unwrap();
         assert_eq!(output.last(), Some(&b'\n'));
         serde_json::from_slice(&output).unwrap()
     }

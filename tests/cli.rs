@@ -1,16 +1,14 @@
 //! The command line: what it prints, writes and exits with.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use serde_json::Value;
 
-fn corpus(file_name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/corpus")
-        .join(file_name)
-}
+use common::corpus_path as corpus;
 
 /// A path for a file that a test writes.
 fn scratch(file_name: &str) -> PathBuf {

@@ -224,21 +224,12 @@ fn target_of(change: &Change, page_pairs: &[PagePair]) -> Target {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::filter::Filters;
     use crate::geometry::Rect;
-    use crate::testing::{CELL_HEIGHT, CELL_WIDTH, LINE_PITCH, PageBuilder, raw_flow_of};
+    use crate::testing::{CELL_HEIGHT, LINE_PITCH, cell_bounds, comparison_of_pages};
 
     /// The redline of two documents, given as the text of each of their pages.
     fn redline(old_pages: &[impl AsRef<str>], new_pages: &[impl AsRef<str>]) -> Redline {
-        fn flow(pages: &[impl AsRef<str>]) -> crate::flow::Flow {
-            raw_flow_of(
-                pages
-                    .iter()
-                    .map(|text| PageBuilder::new().text(text.as_ref())),
-            )
-        }
-        let comparison =
-            Comparison::of_flows(flow(old_pages), flow(new_pages), &Filters::default());
+        let comparison = comparison_of_pages(old_pages, new_pages);
         Redline::of(&comparison, "old.pdf", "new.pdf")
     }
 
@@ -256,12 +247,7 @@ mod tests {
 
     /// The bounds of the cells from `columns` on the first line of a page.
     fn cells(columns: std::ops::Range<usize>) -> Rect {
-        Rect {
-            left: columns.start as f32 * CELL_WIDTH,
-            top: 0.0,
-            right: columns.end as f32 * CELL_WIDTH,
-            bottom: CELL_HEIGHT,
-        }
+        cell_bounds(0, columns)
     }
 
     #[test]

@@ -2,16 +2,13 @@
 
 mod common;
 
-use std::path::Path;
 use std::sync::Arc;
 
 use abpdf::change::{ChangeKind, Comparison};
 use abpdf::filter::Filters;
 use abpdf::profile::Profile;
-use abpdf::reader::pdfium::PdfiumReader;
-use abpdf::redline::{self, Redline};
 
-use common::{corpus, flow_of, texts};
+use common::{compare, compare_and_redline, corpus, corpus_path, flow_of, texts};
 
 use ChangeKind::{Deleted, Inserted, Replaced};
 
@@ -53,14 +50,7 @@ fn revision(revision: &str, tagging: &str) -> Arc<Vec<u8>> {
 }
 
 fn profile() -> Profile {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus/revisions.toml");
-    Profile::load(&path).expect("the profile loads")
-}
-
-fn compare(old: Arc<Vec<u8>>, new: Arc<Vec<u8>>, filters: &Filters) -> Comparison {
-    let old = PdfiumReader::open(old).expect("the old PDF opens");
-    let new = PdfiumReader::open(new).expect("the new PDF opens");
-    Comparison::of(&old, &new, filters).expect("the PDFs read")
+    Profile::load(&corpus_path("revisions.toml")).expect("the profile loads")
 }
 
 fn compare_revisions(tagging: &str, filters: &Filters) -> Comparison {
@@ -138,9 +128,7 @@ fn change_is_located_on_its_text() {
 #[test]
 fn redline_lists_the_changes_and_shows_their_pages() {
     let (old, new) = (revision("old", "tagged"), revision("new", "tagged"));
-    let comparison = compare(old.clone(), new.clone(), &profile().filters);
-    let redline = Redline::of(&comparison, "old.pdf", "new.pdf");
-    let output = redline::write(&redline, old, new).expect("the redline is written");
+    let (_, redline, output) = compare_and_redline(old, new, &profile().filters);
 
     let flow = flow_of(Arc::new(output));
     let page_count = flow.page_sizes.len();
@@ -187,9 +175,7 @@ fn redline_is_the_same_every_time() {
     for tagging in ["tagged", "untagged"] {
         let write = || {
             let (old, new) = (revision("old", tagging), revision("new", tagging));
-            let comparison = compare(old.clone(), new.clone(), &profile().filters);
-            let redline = Redline::of(&comparison, "old.pdf", "new.pdf");
-            redline::write(&redline, old, new).expect("the redline is written")
+            compare_and_redline(old, new, &profile().filters).2
         };
         assert_eq!(write(), write());
     }
@@ -198,9 +184,7 @@ fn redline_is_the_same_every_time() {
 #[test]
 fn redline_of_equal_documents_is_a_summary_that_says_so() {
     let pdf = revision("old", "tagged");
-    let comparison = compare(pdf.clone(), pdf.clone(), &Filters::default());
-    let redline = Redline::of(&comparison, "old.pdf", "new.pdf");
-    let output = redline::write(&redline, pdf.clone(), pdf).expect("the redline is written");
+    let (_, _, output) = compare_and_redline(pdf.clone(), pdf, &Filters::default());
 
     let flow = flow_of(Arc::new(output));
     assert_eq!(flow.page_sizes.len(), 1);

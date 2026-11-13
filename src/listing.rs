@@ -29,14 +29,11 @@ pub fn write(comparison: &Comparison, mut output: impl Write) -> io::Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::filter::Filters;
-    use crate::testing::{PageBuilder, raw_flow_of};
+    use crate::testing::comparison_of;
 
     fn listing(old: &str, new: &str) -> String {
-        let flow = |text| raw_flow_of([PageBuilder::new().text(text)]);
-        let comparison = Comparison::of_flows(flow(old), flow(new), &Filters::default());
         let mut output = Vec::new();
-        write(&comparison, &mut output).unwrap();
+        write(&comparison_of(old, new), &mut output).unwrap();
         String::from_utf8(output).unwrap()
     }
 

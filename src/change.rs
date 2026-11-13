@@ -10,7 +10,6 @@ use crate::diff::{self, Hunk};
 use crate::filter::Filters;
 use crate::flow::{self, Flow, Gap, Token};
 use crate::geometry::Rect;
-use crate::reader::{ReadError, Reader};
 
 /// Two documents and the changes from the old one to the new one.
 #[derive(Clone, Debug, PartialEq)]
@@ -57,13 +56,8 @@ pub struct Area {
 }
 
 impl Comparison {
-    /// Reads and compares two documents.
-    pub fn of(old: &dyn Reader, new: &dyn Reader, filters: &Filters) -> Result<Self, ReadError> {
-        Ok(Self::of_flows(Flow::read(old)?, Flow::read(new)?, filters))
-    }
-
     /// Compares two flows as [`Flow::read`] returns them.
-    pub fn of_flows(old: Flow, new: Flow, filters: &Filters) -> Self {
+    pub fn of(old: Flow, new: Flow, filters: &Filters) -> Self {
         let [old, new] = flow::prepare([old, new], filters);
         let (old_compared, new_compared) = (Compared::of(&old), Compared::of(&new));
         let hunks = diff::diff(&old_compared.keys(), &new_compared.keys());
@@ -222,22 +216,18 @@ mod tests {
     use regex::Regex;
 
     use super::*;
-    use crate::testing::{CELL_HEIGHT, CELL_WIDTH, LINE_PITCH, PageBuilder, raw_flow_of};
+    use crate::testing::{PageBuilder, cell_bounds, comparison_of, raw_flow_of};
 
     fn compare_with(
         old: impl IntoIterator<Item = PageBuilder>,
         new: impl IntoIterator<Item = PageBuilder>,
         filters: &Filters,
     ) -> Vec<Change> {
-        Comparison::of_flows(raw_flow_of(old), raw_flow_of(new), filters).changes
+        Comparison::of(raw_flow_of(old), raw_flow_of(new), filters).changes
     }
 
     fn compare(old: &str, new: &str) -> Vec<Change> {
-        compare_with(
-            [PageBuilder::new().text(old)],
-            [PageBuilder::new().text(new)],
-            &Filters::default(),
-        )
+        comparison_of(old, new).changes
     }
 
     /// The kind and the two texts of each change.
@@ -256,15 +246,9 @@ mod tests {
 
     /// The area of the cells from `columns` on `line` of page `page_index`.
     fn cells(page_index: usize, line: usize, columns: Range<usize>) -> Area {
-        let top = line as f32 * LINE_PITCH;
         Area {
             page_index,
-            bounds: Rect {
-                left: columns.start as f32 * CELL_WIDTH,
-                top,
-                right: columns.end as f32 * CELL_WIDTH,
-                bottom: top + CELL_HEIGHT,
-            },
+            bounds: cell_bounds(line, columns),
         }
     }
 
