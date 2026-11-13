@@ -5,7 +5,8 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use abpdf::flow::{Flow, Token};
+use abpdf::filter::Filters;
+use abpdf::flow::{Flow, Token, Vocabulary};
 use abpdf::reader::pdfium::PdfiumReader;
 
 /// A PDF of the test corpus, which `mise run corpus` builds from the Typst
@@ -21,8 +22,9 @@ pub fn corpus(file_name: &str) -> Arc<Vec<u8>> {
 pub fn flow_of(pdf: Arc<Vec<u8>>) -> Flow {
     let reader = PdfiumReader::open(pdf).expect("the PDF opens");
     let mut flow = Flow::read(&reader).expect("the PDF reads");
-    flow.exclude_artifacts();
-    flow.join_broken_words();
+    Filters::default().apply(&mut flow);
+    let vocabulary = Vocabulary::of([&flow]);
+    flow.join_broken_words(&vocabulary);
     flow
 }
 

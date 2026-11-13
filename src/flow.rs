@@ -13,6 +13,7 @@ use crate::geometry::{Rect, Size};
 use crate::reader::{ReadError, Reader, Style};
 
 pub use self::builder::FlowBuilder;
+pub use self::join::Vocabulary;
 
 /// The tokens of a document in reading order.
 #[derive(Clone, Debug, PartialEq)]
@@ -37,16 +38,6 @@ impl Flow {
         }
         Ok(builder.finish())
     }
-
-    /// Leaves every token that the producer marked as an artifact out of the
-    /// comparison.
-    pub fn exclude_artifacts(&mut self) {
-        for token in &mut self.tokens {
-            if token.is_artifact {
-                token.exclusion.get_or_insert(Exclusion::Artifact);
-            }
-        }
-    }
 }
 
 /// A word or a punctuation mark.
@@ -65,6 +56,7 @@ pub struct Token {
     /// Index into [`Flow::structure_paths`].
     pub structure_path: Option<usize>,
     /// Why the token is left out of the comparison, if it is.
+    /// [`Filters::apply`](crate::filter::Filters::apply) decides.
     pub exclusion: Option<Exclusion>,
     /// The hyphen that ends a line right after the token, until
     /// [`Flow::join_broken_words`] has dealt with it.
@@ -112,6 +104,12 @@ pub enum Gap {
 pub enum Exclusion {
     /// The producer marked the token as an artifact.
     Artifact,
+    /// The token is in the band at the top of its page.
+    Header,
+    /// The token is in the band at the bottom of its page.
+    Footer,
+    /// The ignore pattern with this index matched the token.
+    Pattern(usize),
 }
 
 /// A hyphen that ends a line in the middle of a word.

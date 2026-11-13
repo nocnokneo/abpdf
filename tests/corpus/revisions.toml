@@ -1,0 +1,17 @@
+# The profile for comparing the revisions of revisions.typ.
+
+# The header and the footer, for the build without tags: with tags they are
+# marked as artifacts.
+header_height_points = 50
+footer_height_points = 50
+
+ignore_patterns = [
+    # The leaders of the table of contents and the page numbers after them.
+    '(?m)((?:\. ){4,}\d+)$',
+    # Page references.
+    '\(p\. (\d+)\)',
+    # Section numbers, where a line starts with one.
+    '(?m)^(\d+(?:\.\d+)+) ',
+    # Figure and table numbers.
+    '(?:Figure|Table) (\d+)',
+]

@@ -1,150 +1,16 @@
 use super::*;
-use crate::reader::{Char, Color, Page, Span, TextItem};
-
-const CELL_WIDTH: f32 = 10.0;
-const CELL_HEIGHT: f32 = 12.0;
-const LINE_PITCH: f32 = 20.0;
-
-/// Builds a page on which every character takes one cell of a grid.
-struct PageBuilder {
-    page: Page,
-    column: usize,
-    line: usize,
-}
-
-impl PageBuilder {
-    fn new() -> Self {
-        Self {
-            page: Page {
-                size: Size {
-                    width: 600.0,
-                    height: 800.0,
-                },
-                spans: vec![body_span()],
-                text: Vec::new(),
-            },
-            column: 0,
-            line: 0,
-        }
-    }
-
-    /// Adds text to the current span: a space is white space and a newline
-    /// is a line break.
-    fn text(mut self, text: &str) -> Self {
-        for character in text.chars() {
-            match character {
-                ' ' => {
-                    self.page.text.push(TextItem::Space);
-                    self.column += 1;
-                }
-                '\n' => {
-                    self.page.text.push(TextItem::LineBreak);
-                    self.next_line();
-                }
-                _ => self.push_char(character, false),
-            }
-        }
-        self
-    }
-
-    /// Starts a span that differs from body text as `change` says.
-    fn span(mut self, change: impl FnOnce(&mut Span)) -> Self {
-        let mut span = body_span();
-        change(&mut span);
-        self.page.spans.push(span);
-        self
-    }
-
-    fn body(self) -> Self {
-        self.span(|_| {})
-    }
-
-    fn artifact(self) -> Self {
-        self.span(|span| span.is_artifact = true)
-    }
-
-    fn actual_text(self, actual_text: &str) -> Self {
-        self.span(|span| span.actual_text = Some(actual_text.to_owned()))
-    }
-
-    /// Adds a hyphen that ends the line inside a word, the way a reader
-    /// reports it: with no line break after it.
-    fn line_end_hyphen(mut self) -> Self {
-        self.push_char('-', true);
-        self.next_line();
-        self
-    }
-
-    fn push_char(&mut self, text: char, is_line_end_hyphen: bool) {
-        let left = self.column as f32 * CELL_WIDTH;
-        let top = self.line as f32 * LINE_PITCH;
-        self.page.text.push(TextItem::Char(Char {
-            text,
-            bounds: Rect {
-                left,
-                top,
-                right: left + CELL_WIDTH,
-                bottom: top + CELL_HEIGHT,
-            },
-            span: self.page.spans.len() - 1,
-            is_line_end_hyphen,
-        }));
-        self.column += 1;
-    }
-
-    fn next_line(&mut self) {
-        self.column = 0;
-        self.line += 1;
-    }
-
-    fn build(self) -> Page {
-        self.page
-    }
-}
-
-fn body_span() -> Span {
-    Span {
-        style: Style {
-            font_name: "Body".to_owned(),
-            font_size: 10.0,
-            font_weight: Some(400),
-            is_italic: false,
-            fill_color: Color {
-                red: 0,
-                green: 0,
-                blue: 0,
-                alpha: 255,
-            },
-            rotation_degrees: 0.0,
-        },
-        is_artifact: false,
-        structure_path: None,
-        actual_text: None,
-    }
-}
+use crate::filter::Filters;
+use crate::testing::{
+    CELL_HEIGHT, CELL_WIDTH, LINE_PITCH, PageBuilder, compared_texts, raw_flow_of, texts,
+};
 
 /// The flow of a document with these pages, as the comparison sees it.
 fn flow_of(pages: impl IntoIterator<Item = PageBuilder>) -> Flow {
-    let mut builder = FlowBuilder::default();
-    for page in pages {
-        builder.add_page(&page.build());
-    }
-    let mut flow = builder.finish();
-    flow.exclude_artifacts();
-    flow.join_broken_words();
+    let mut flow = raw_flow_of(pages);
+    Filters::default().apply(&mut flow);
+    let vocabulary = Vocabulary::of([&flow]);
+    flow.join_broken_words(&vocabulary);
     flow
-}
-
-fn texts(flow: &Flow) -> Vec<&str> {
-    flow.tokens
-        .iter()
-        .map(|token| token.text.as_str())
-        .collect()
-}
-
-fn compared_texts(flow: &Flow) -> Vec<&str> {
-    let compared = flow.tokens.iter().filter(|token| !token.is_excluded());
-    compared.map(|token| token.text.as_str()).collect()
 }
 
 #[test]
@@ -432,4 +298,43 @@ fn hyphen_of_excluded_text_is_only_part_of_its_bounds() {
             .iter()
             .all(|token| token.line_end_hyphen.is_none())
     );
+}
+
+#[test]
+fn hyphen_of_unknown_kind_stays_between_words_that_are_hyphenated_elsewhere() {
+    let page = PageBuilder::new()
+        .text("a well-known fact is well")
+        .line_end_hyphen()
+        .text("known");
+    let flow = flow_of([page]);
+    assert_eq!(
+        texts(&flow),
+        [
+            "a", "well", "-", "known", "fact", "is", "well", "-", "known"
+        ]
+    );
+}
+
+#[test]
+fn hyphen_of_unknown_kind_joins_a_word_that_is_also_written_whole() {
+    // Both spellings occur, and automatic hyphenation is the likelier reason
+    // for a hyphen at a line end.
+    let page = PageBuilder::new()
+        .text("on-line online on")
+        .line_end_hyphen()
+        .text("line");
+    let flow = flow_of([page]);
+    assert_eq!(texts(&flow), ["on", "-", "line", "online", "online"]);
+}
+
+#[test]
+fn vocabulary_spans_the_documents_it_is_collected_from() {
+    let mut broken = raw_flow_of([PageBuilder::new()
+        .text("well")
+        .line_end_hyphen()
+        .text("known")]);
+    let whole = raw_flow_of([PageBuilder::new().text("well-known")]);
+    let vocabulary = Vocabulary::of([&broken, &whole]);
+    broken.join_broken_words(&vocabulary);
+    assert_eq!(texts(&broken), ["well", "-", "known"]);
 }

@@ -97,9 +97,10 @@ fn unmarked_page(page_index: usize) -> SheetPage {
 fn first_new_page() -> Redline {
     Redline {
         sheets: vec![Sheet {
-            old: None,
             new: Some(unmarked_page(0)),
+            ..Sheet::default()
         }],
+        ..Redline::default()
     }
 }
 
@@ -227,9 +228,10 @@ fn text_of_embedded_pages_stays_text() {
         sheets: (0..page_count)
             .map(|page_index| Sheet {
                 old: Some(unmarked_page(page_index)),
-                new: None,
+                ..Sheet::default()
             })
             .collect(),
+        ..Redline::default()
     };
     let output =
         redline::write(&redline, pdf.clone(), pdf.clone()).expect("the redline is written");
@@ -292,8 +294,10 @@ fn same_input_gives_the_same_bytes() {
             .map(|page_index| Sheet {
                 old: Some(page(page_index)),
                 new: Some(page(3 - page_index)),
+                ..Sheet::default()
             })
             .collect(),
+        ..Redline::default()
     };
     let write =
         || redline::write(&redline, old.clone(), new.clone()).expect("the redline is written");
@@ -322,8 +326,9 @@ fn page_that_a_source_does_not_have_is_an_error() {
     let redline = Redline {
         sheets: vec![Sheet {
             old: Some(unmarked_page(1)),
-            new: None,
+            ..Sheet::default()
         }],
+        ..Redline::default()
     };
     let result = redline::write(&redline, source.clone(), source);
     assert!(matches!(

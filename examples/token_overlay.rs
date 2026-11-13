@@ -36,6 +36,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let sheet = Sheet {
             old: old_pages.next(),
             new: new_pages.next(),
+            ..Sheet::default()
         };
         if sheet == Sheet::default() {
             break;
