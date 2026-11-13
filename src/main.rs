@@ -29,6 +29,10 @@ struct Arguments {
     /// to this file
     #[arg(short, long, value_name = "FILE")]
     output: Option<PathBuf>,
+    /// Write the redline only if there are changes, and remove the file if
+    /// there are none
+    #[arg(long, requires = "output")]
+    only_if_different: bool,
     /// Write the changes as JSON to this file
     #[arg(long, value_name = "FILE")]
     json: Option<PathBuf>,
@@ -60,13 +64,18 @@ fn run(arguments: &Arguments) -> Result<bool, String> {
     let comparison = Comparison::of_flows(old_flow, new_flow, &profile.filters);
 
     if let Some(path) = &arguments.output {
-        let redline = Redline::of(
-            &comparison,
-            &file_name(&arguments.old),
-            &file_name(&arguments.new),
-        );
-        let pdf = redline::write(&redline, old_pdf, new_pdf).map_err(|error| error.to_string())?;
-        fs::write(path, pdf).map_err(|error| in_file(path, error))?;
+        if arguments.only_if_different && comparison.changes.is_empty() {
+            remove_if_present(path)?;
+        } else {
+            let redline = Redline::of(
+                &comparison,
+                &file_name(&arguments.old),
+                &file_name(&arguments.new),
+            );
+            let pdf =
+                redline::write(&redline, old_pdf, new_pdf).map_err(|error| error.to_string())?;
+            fs::write(path, pdf).map_err(|error| in_file(path, error))?;
+        }
     }
     if let Some(path) = &arguments.json {
         let file = File::create(path).map_err(|error| in_file(path, error))?;
@@ -90,6 +99,15 @@ fn read(path: &Path) -> Result<(Arc<Vec<u8>>, Flow), String> {
     })?;
     let flow = Flow::read(&reader).map_err(|error| in_file(path, error))?;
     Ok((pdf, flow))
+}
+
+/// Removes a redline that an earlier comparison left, so that the file is
+/// only there if this comparison wrote it.
+fn remove_if_present(path: &Path) -> Result<(), String> {
+    match fs::remove_file(path) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(in_file(path, error)),
+        _ => Ok(()),
+    }
 }
 
 /// What a document is called in the redline.

@@ -18,10 +18,12 @@ Like `diff`, it exits with 0 if there are none, with 1 if there are some and wit
 | Option | Effect |
 | -- | -- |
 | `-o`, `--output FILE` | Write the redline to `FILE`. |
+| `--only-if-different` | Write the redline only if there are changes, and remove `FILE` if there are none. |
 | `--json FILE` | Write the changes to `FILE` as JSON. |
 | `--profile FILE` | Read the settings of the comparison from `FILE`. |
 
 The redline is a PDF that starts with a summary of the changes.
+It is written even if there are none, as a summary that says so, unless `--only-if-different` is given.
 After it comes a sheet for each pair of pages with a change: the old page on the left and the new page on the right, with removed text marked in red and added text in green.
 The entries of the summary and the bookmarks of the PDF link to the changes.
 

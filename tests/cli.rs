@@ -89,6 +89,50 @@ fn redline_is_written_for_equal_documents_too() {
 }
 
 #[test]
+fn redline_of_equal_documents_can_be_left_out() {
+    let (pdf, redline) = (
+        corpus("revisions-old-tagged.pdf"),
+        scratch("cli-left-out.pdf"),
+    );
+    fs::write(&redline, "the redline of an earlier comparison").unwrap();
+    let output = abpdf(&[
+        &pdf,
+        &pdf,
+        "-o".as_ref(),
+        &redline,
+        "--only-if-different".as_ref(),
+    ]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(!redline.exists());
+
+    // And it does not matter that there was no file to remove.
+    let output = abpdf(&[
+        &pdf,
+        &pdf,
+        "-o".as_ref(),
+        &redline,
+        "--only-if-different".as_ref(),
+    ]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+}
+
+#[test]
+fn redline_of_different_documents_is_written_either_way() {
+    let redline = scratch("cli-different.pdf");
+    let output = compare_revisions(&["-o".as_ref(), &redline, "--only-if-different".as_ref()]);
+    assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
+    assert!(fs::read(&redline).unwrap().starts_with(b"%PDF-"));
+}
+
+#[test]
+fn leaving_the_redline_out_needs_a_redline_to_leave_out() {
+    let pdf = corpus("revisions-old-tagged.pdf");
+    let output = abpdf(&[&pdf, &pdf, "--only-if-different".as_ref()]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("--output"), "{}", stderr(&output));
+}
+
+#[test]
 fn file_that_is_missing_exits_with_2() {
     let (pdf, missing) = (corpus("revisions-old-tagged.pdf"), corpus("no-such.pdf"));
     let output = abpdf(&[&pdf, &missing]);
