@@ -66,21 +66,25 @@ pub(super) fn render(
 
     if let Some(summary) = &redline.summary {
         let pages = SummaryPages::of(summary, layouts.first().map(|layout| layout.size));
-        let sheet_page_offset = pages.count();
-        let destination_of = |target: &Target| destination_of(target, &layouts, sheet_page_offset);
+        let destinations: Vec<XyzDestination> = summary
+            .entries
+            .iter()
+            .map(|entry| destination_of(&entry.target, &layouts, pages.count()))
+            .collect();
+        let sheet_count = redline.sheets.len();
         summary::draw(
             &mut document,
             &font,
             summary,
             &pages,
-            redline.sheets.len(),
-            &destination_of,
+            sheet_count,
+            &destinations,
         );
 
         let mut outline = Outline::new();
-        for (index, entry) in summary.entries.iter().enumerate() {
+        for (index, (entry, destination)) in summary.entries.iter().zip(destinations).enumerate() {
             let title = summary::bookmark_title(index, entry);
-            outline.push_child(OutlineNode::new(title, destination_of(&entry.target)));
+            outline.push_child(OutlineNode::new(title, destination));
         }
         document.set_outline(outline);
         document.set_metadata(Metadata::new().title(summary.title.clone()));

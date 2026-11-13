@@ -1,14 +1,13 @@
 //! The pages at the front of the redline that list the changes.
 
-use std::ops::Range;
-
 use krilla::Document;
 use krilla::annotation::{LinkAnnotation, Target as LinkTarget};
 use krilla::destination::XyzDestination;
 use krilla::page::PageSettings;
+use krilla::surface::Surface;
 
 use super::text::TextFont;
-use super::{Rgb, Summary, SummaryEntry, Target};
+use super::{Rgb, Summary, SummaryEntry};
 use crate::geometry::Size;
 use crate::listing::shortened;
 
@@ -37,11 +36,19 @@ const TEXT_COLOR: Rgb = Rgb::new(51, 51, 51);
 /// How many characters of each text a bookmark shows.
 const BOOKMARK_TEXT_CHARS: usize = 40;
 
-/// How the entries of a summary are divided over pages.
+/// Where the entries of a summary go.
 pub(super) struct SummaryPages {
     page_size: Size,
     /// The entries on each page. There is always a first page.
-    entries: Vec<Range<usize>>,
+    pages: Vec<Vec<PlacedEntry>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PlacedEntry {
+    /// Index into [`Summary::entries`].
+    index: usize,
+    /// The distance of the entry from the top edge of its page.
+    top: f32,
 }
 
 impl SummaryPages {
@@ -49,23 +56,23 @@ impl SummaryPages {
     pub fn of(summary: &Summary, sheet_size: Option<Size>) -> Self {
         let page_size = sheet_size.unwrap_or(DEFAULT_PAGE_SIZE);
         let bottom = page_size.height - MARGIN;
-        let mut entries: Vec<Range<usize>> = Vec::new();
-        entries.push(0..0);
+        let mut pages = vec![Vec::new()];
         let mut top = MARGIN + HEADING_HEIGHT;
         for (index, entry) in summary.entries.iter().enumerate() {
-            let is_first_on_page = entries.last().is_some_and(Range::is_empty);
+            let is_first_on_page = pages.last().is_some_and(Vec::is_empty);
             if top + height_of(entry) > bottom && !is_first_on_page {
-                entries.push(index..index);
+                pages.push(Vec::new());
                 top = MARGIN;
             }
+            let page = pages.last_mut().expect("there is a first page");
+            page.push(PlacedEntry { index, top });
             top += height_of(entry) + ENTRY_GAP;
-            entries.last_mut().expect("there is a first page").end = index + 1;
         }
-        Self { page_size, entries }
+        Self { page_size, pages }
     }
 
     pub fn count(&self) -> usize {
-        self.entries.len()
+        self.pages.len()
     }
 }
 
@@ -83,78 +90,87 @@ fn lines_of(entry: &SummaryEntry) -> impl Iterator<Item = (&'static str, Rgb, &s
     lines.into_iter().filter(|(_, _, text)| !text.is_empty())
 }
 
+/// Draws the pages. `destinations` has, for each entry, the view of the
+/// redline that it links to.
 pub(super) fn draw(
     document: &mut Document,
     font: &TextFont,
     summary: &Summary,
     pages: &SummaryPages,
     sheet_count: usize,
-    destination_of: &dyn Fn(&Target) -> XyzDestination,
+    destinations: &[XyzDestination],
 ) {
     let Size { width, height } = pages.page_size;
-    for (page_index, entries) in pages.entries.iter().enumerate() {
+    for (page_index, placed_entries) in pages.pages.iter().enumerate() {
         let settings = PageSettings::from_wh(width, height).expect("a page has a positive size");
         let mut page = document.start_page_with(settings);
         let mut surface = page.surface();
-        let mut links = Vec::new();
-
-        let mut top = MARGIN;
         if page_index == 0 {
-            let title = font.fitted(&summary.title, TITLE_FONT_SIZE, width - 2.0 * MARGIN);
-            font.draw(
-                &mut surface,
-                (MARGIN, top + 14.0),
-                TITLE_FONT_SIZE,
-                TEXT_COLOR,
-                &title,
-            );
-            let counts = counts_line(summary.entries.len(), sheet_count);
-            font.draw(
-                &mut surface,
-                (MARGIN, top + 34.0),
-                FONT_SIZE,
-                TEXT_COLOR,
-                &counts,
-            );
-            top += HEADING_HEIGHT;
+            draw_heading(&mut surface, font, summary, sheet_count, width);
         }
-        for index in entries.clone() {
-            let entry = &summary.entries[index];
-            let baseline = top + FONT_SIZE;
-            let number = (index + 1).to_string();
-            let number_left = NUMBER_RIGHT - font.width(&number, FONT_SIZE);
-            font.draw(
-                &mut surface,
-                (number_left, baseline),
-                FONT_SIZE,
-                TEXT_COLOR,
-                &number,
-            );
-            font.draw(
-                &mut surface,
-                (LOCATION_LEFT, baseline),
-                FONT_SIZE,
-                TEXT_COLOR,
-                &entry.location,
-            );
-            for (line, (sign, color, text)) in lines_of(entry).enumerate() {
-                let baseline = baseline + line as f32 * LINE_HEIGHT;
-                let text = font.fitted(text, FONT_SIZE, width - MARGIN - TEXT_LEFT);
-                font.draw(&mut surface, (SIGN_LEFT, baseline), FONT_SIZE, color, sign);
-                font.draw(&mut surface, (TEXT_LEFT, baseline), FONT_SIZE, color, &text);
-            }
-            let bottom = top + height_of(entry);
-            let area = krilla::geom::Rect::from_ltrb(MARGIN, top, width - MARGIN, bottom);
-            links.extend(area.map(|area| (area, destination_of(&entry.target))));
-            top = bottom + ENTRY_GAP;
+        for placed in placed_entries {
+            draw_entry(&mut surface, font, summary, placed, width);
         }
-
         surface.finish();
-        for (area, destination) in links {
-            let target = LinkTarget::Destination(destination.into());
-            page.add_annotation(LinkAnnotation::new(area, target).into());
+
+        for placed in placed_entries {
+            let bottom = placed.top + height_of(&summary.entries[placed.index]);
+            let area = krilla::geom::Rect::from_ltrb(MARGIN, placed.top, width - MARGIN, bottom);
+            if let Some(area) = area {
+                let target = LinkTarget::Destination(destinations[placed.index].clone().into());
+                page.add_annotation(LinkAnnotation::new(area, target).into());
+            }
         }
         page.finish();
+    }
+}
+
+fn draw_heading(
+    surface: &mut Surface,
+    font: &TextFont,
+    summary: &Summary,
+    sheet_count: usize,
+    page_width: f32,
+) {
+    let title = font.fitted(&summary.title, TITLE_FONT_SIZE, page_width - 2.0 * MARGIN);
+    let title_position = (MARGIN, MARGIN + 14.0);
+    font.draw(surface, title_position, TITLE_FONT_SIZE, TEXT_COLOR, &title);
+    let counts = counts_line(summary.entries.len(), sheet_count);
+    let counts_position = (MARGIN, MARGIN + 34.0);
+    font.draw(surface, counts_position, FONT_SIZE, TEXT_COLOR, &counts);
+}
+
+fn draw_entry(
+    surface: &mut Surface,
+    font: &TextFont,
+    summary: &Summary,
+    placed: &PlacedEntry,
+    page_width: f32,
+) {
+    let entry = &summary.entries[placed.index];
+    let baseline = placed.top + FONT_SIZE;
+    let number = (placed.index + 1).to_string();
+    let number_left = NUMBER_RIGHT - font.width(&number, FONT_SIZE);
+    font.draw(
+        surface,
+        (number_left, baseline),
+        FONT_SIZE,
+        TEXT_COLOR,
+        &number,
+    );
+    let location_position = (LOCATION_LEFT, baseline);
+    font.draw(
+        surface,
+        location_position,
+        FONT_SIZE,
+        TEXT_COLOR,
+        &entry.location,
+    );
+    for (line, (sign, color, text)) in lines_of(entry).enumerate() {
+        let baseline = baseline + line as f32 * LINE_HEIGHT;
+        let text = font.fitted(text, FONT_SIZE, page_width - MARGIN - TEXT_LEFT);
+        font.draw(surface, (SIGN_LEFT, baseline), FONT_SIZE, color, sign);
+        font.draw(surface, (TEXT_LEFT, baseline), FONT_SIZE, color, &text);
     }
 }
 
@@ -186,6 +202,7 @@ pub(super) fn bookmark_title(index: usize, entry: &SummaryEntry) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::redline::Target;
 
     fn entry(old_text: &str, new_text: &str) -> SummaryEntry {
         SummaryEntry {
@@ -206,11 +223,16 @@ mod tests {
         }
     }
 
+    /// The indices of the entries on each page.
+    fn entries_by_page(pages: &SummaryPages) -> Vec<Vec<usize>> {
+        let indices = |page: &Vec<PlacedEntry>| page.iter().map(|placed| placed.index).collect();
+        pages.pages.iter().map(indices).collect()
+    }
+
     #[test]
     fn summary_without_entries_has_one_page() {
         let pages = SummaryPages::of(&summary_of(Vec::new()), None);
-        assert_eq!(pages.count(), 1);
-        assert!(pages.entries[0].is_empty());
+        assert_eq!(entries_by_page(&pages), [Vec::<usize>::new()]);
         assert_eq!(pages.page_size, DEFAULT_PAGE_SIZE);
     }
 
@@ -226,7 +248,32 @@ mod tests {
         assert_eq!((HEADING_HEIGHT / entry_pitch).floor(), 3.0);
         let entries = (0..10).map(|_| entry("old", "")).collect();
         let pages = SummaryPages::of(&summary_of(entries), Some(page_size));
-        assert_eq!(pages.entries, [0..3, 3..9, 9..10]);
+        assert_eq!(
+            entries_by_page(&pages),
+            [vec![0, 1, 2], vec![3, 4, 5, 6, 7, 8], vec![9]]
+        );
+    }
+
+    #[test]
+    fn entries_start_under_the_heading_on_the_first_page_only() {
+        let page_size = Size {
+            width: 600.0,
+            height: 2.0 * MARGIN + HEADING_HEIGHT + LINE_HEIGHT,
+        };
+        let entries = vec![entry("old", ""), entry("old", ""), entry("old", "")];
+        let pages = SummaryPages::of(&summary_of(entries), Some(page_size));
+        let tops: Vec<Vec<f32>> = pages
+            .pages
+            .iter()
+            .map(|page| page.iter().map(|placed| placed.top).collect())
+            .collect();
+        assert_eq!(
+            tops,
+            [
+                vec![MARGIN + HEADING_HEIGHT],
+                vec![MARGIN, MARGIN + LINE_HEIGHT + ENTRY_GAP]
+            ]
+        );
     }
 
     #[test]
@@ -245,7 +292,7 @@ mod tests {
         };
         let entries = vec![entry("old", "new"), entry("old", "new")];
         let pages = SummaryPages::of(&summary_of(entries), Some(page_size));
-        assert_eq!(pages.entries, [0..1, 1..2]);
+        assert_eq!(entries_by_page(&pages), [vec![0], vec![1]]);
     }
 
     #[test]
