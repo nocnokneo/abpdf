@@ -11,7 +11,7 @@ use super::{Flow, Gap, HyphenKind, LineEndHyphen, Token};
 /// Such a hyphen is taken to be hard if the two words around it are joined
 /// by a hyphen elsewhere and never written as one word, and soft otherwise.
 #[derive(Clone, Debug, Default)]
-pub struct Vocabulary {
+pub(super) struct Vocabulary {
     words: HashSet<String>,
     /// Pairs of words that a hyphen joins within a line, as `first-second`.
     hyphenated_pairs: HashSet<String>,
@@ -19,7 +19,7 @@ pub struct Vocabulary {
 
 impl Vocabulary {
     /// Collects the words of the tokens that take part in the comparison.
-    pub fn of<'a>(flows: impl IntoIterator<Item = &'a Flow>) -> Self {
+    pub(super) fn of<'a>(flows: impl IntoIterator<Item = &'a Flow>) -> Self {
         let mut vocabulary = Self::default();
         for flow in flows {
             let compared: Vec<&Token> = flow
@@ -71,7 +71,7 @@ impl Flow {
     /// in between.
     /// A hard hyphen becomes a token of its own.
     /// `vocabulary` decides about a hyphen of unknown kind.
-    pub fn join_broken_words(&mut self, vocabulary: &Vocabulary) {
+    pub(super) fn join_broken_words(&mut self, vocabulary: &Vocabulary) {
         let mut joined: Vec<Token> = Vec::with_capacity(self.tokens.len());
         // The index in `joined` of a token that waits for the rest of its word.
         let mut open: Option<usize> = None;

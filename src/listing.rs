@@ -2,7 +2,8 @@
 
 use std::io::{self, Write};
 
-use crate::change::{Change, Comparison};
+use crate::change::{ChangeSide, Comparison};
+use crate::excerpt::shortened;
 
 /// Longer texts are cut off, so that one change stays a few lines.
 const MAX_TEXT_CHARS: usize = 200;
@@ -11,9 +12,10 @@ const MAX_TEXT_CHARS: usize = 200;
 /// new text after `+`, and a count at the end.
 pub fn write(comparison: &Comparison, mut output: impl Write) -> io::Result<()> {
     for change in &comparison.changes {
-        writeln!(output, "@ {}", pages_of(change))?;
-        for (sign, text) in [('-', &change.old.text), ('+', &change.new.text)] {
-            if !text.is_empty() {
+        writeln!(output, "@ {}", change.location())?;
+        let texts = change.sides.as_ref().map(ChangeSide::text);
+        for (sign, text) in [('-', texts.old), ('+', texts.new)] {
+            if let Some(text) = text {
                 writeln!(output, "{sign} {}", shortened(text, MAX_TEXT_CHARS))?;
             }
         }
@@ -25,38 +27,14 @@ pub fn write(comparison: &Comparison, mut output: impl Write) -> io::Result<()> 
     }
 }
 
-/// The pages on which a change starts, as a reader counts them.
-pub fn pages_of(change: &Change) -> String {
-    let first_page = |areas: &[crate::change::Area]| areas[0].page_index + 1;
-    format!(
-        "old p. {} / new p. {}",
-        first_page(&change.old.areas),
-        first_page(&change.new.areas)
-    )
-}
-
-/// `text`, or its start with an ellipsis if it has more than `max_chars`
-/// characters.
-pub fn shortened(text: &str, max_chars: usize) -> String {
-    match text.char_indices().nth(max_chars.saturating_sub(1)) {
-        Some((cut, _)) if text[cut..].chars().nth(1).is_some() => {
-            format!("{}…", text[..cut].trim_end())
-        }
-        _ => text.to_owned(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::filter::Filters;
-    use crate::testing::{PageBuilder, raw_flow_of};
+    use crate::testing::comparison_of;
 
     fn listing(old: &str, new: &str) -> String {
-        let flow = |text| raw_flow_of([PageBuilder::new().text(text)]);
-        let comparison = Comparison::of_flows(flow(old), flow(new), &Filters::default());
         let mut output = Vec::new();
-        write(&comparison, &mut output).unwrap();
+        write(&comparison_of(old, new), &mut output).unwrap();
         String::from_utf8(output).unwrap()
     }
 
@@ -69,6 +47,11 @@ mod tests {
     }
 
     #[test]
+    fn side_that_is_nowhere_in_its_document_has_no_page() {
+        assert_eq!(listing("", "new"), "@ new p. 1\n+ new\n1 change\n");
+    }
+
+    #[test]
     fn no_changes_are_said_so() {
         assert_eq!(listing("same", "same"), "No differences\n");
     }
@@ -76,17 +59,5 @@ mod tests {
     #[test]
     fn one_change_is_singular() {
         assert!(listing("one", "two").ends_with("\n1 change\n"));
-    }
-
-    #[test]
-    fn short_text_is_kept() {
-        assert_eq!(shortened("abc", 3), "abc");
-        assert_eq!(shortened("", 3), "");
-    }
-
-    #[test]
-    fn long_text_is_cut_to_the_limit_with_an_ellipsis() {
-        assert_eq!(shortened("abcd", 3), "ab…");
-        assert_eq!(shortened("ab cd", 4), "ab…");
     }
 }

@@ -7,16 +7,13 @@ use std::sync::Arc;
 use std::{env, fs};
 
 use abpdf::filter::Filters;
-use abpdf::flow::{Flow, Gap, Vocabulary};
+use abpdf::flow::{self, Flow, Gap};
 use abpdf::reader::pdfium::PdfiumReader;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let path = env::args().nth(1).ok_or("usage: tokens DOCUMENT.pdf")?;
     let reader = PdfiumReader::open(Arc::new(fs::read(path)?))?;
-    let mut flow = Flow::read(&reader)?;
-    Filters::default().apply(&mut flow);
-    let vocabulary = Vocabulary::of([&flow]);
-    flow.join_broken_words(&vocabulary);
+    let [flow] = flow::prepare([Flow::read(&reader)?], &Filters::default());
 
     for token in &flow.tokens {
         let first = token.fragments[0];
@@ -25,18 +22,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             Gap::Space => "_",
             Gap::LineBreak => "/",
         };
-        let style = &flow.styles[token.style];
         println!(
-            "{}:{}\t{gap}\t{}\t{}\t{}\t{} {}",
+            "{}:{}\t{gap}\t{}\t{}",
             first.page_index + 1,
             first.line_index + 1,
             token.text,
             if token.is_artifact { "artifact" } else { "" },
-            token
-                .structure_path
-                .map_or("", |index| &flow.structure_paths[index]),
-            style.font_name,
-            style.font_size,
         );
     }
     Ok(())

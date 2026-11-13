@@ -1,16 +1,14 @@
 //! The command line: what it prints, writes and exits with.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use serde_json::Value;
 
-fn corpus(file_name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/corpus")
-        .join(file_name)
-}
+use common::corpus_path as corpus;
 
 /// A path for a file that a test writes.
 fn scratch(file_name: &str) -> PathBuf {
@@ -171,6 +169,19 @@ fn profile_with_a_mistake_exits_with_2() {
     assert_eq!(output.status.code(), Some(2));
     assert!(
         stderr(&output).contains("ignore pattern 1"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn profile_that_is_missing_exits_with_2_and_is_named_once() {
+    let (pdf, profile) = (corpus("revisions-old-tagged.pdf"), corpus("no-such.toml"));
+    let output = abpdf(&[&pdf, &pdf, "--profile".as_ref(), &profile]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        stderr(&output).matches("no-such.toml").count(),
+        1,
         "{}",
         stderr(&output)
     );

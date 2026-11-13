@@ -6,10 +6,7 @@ use crate::testing::{
 
 /// The flow of a document with these pages, as the comparison sees it.
 fn flow_of(pages: impl IntoIterator<Item = PageBuilder>) -> Flow {
-    let mut flow = raw_flow_of(pages);
-    Filters::default().apply(&mut flow);
-    let vocabulary = Vocabulary::of([&flow]);
-    flow.join_broken_words(&vocabulary);
+    let [flow] = prepare([raw_flow_of(pages)], &Filters::default());
     flow
 }
 
@@ -87,37 +84,6 @@ fn invisible_characters_are_not_text() {
 fn soft_hyphen_inside_a_line_is_not_text() {
     let flow = flow_of([PageBuilder::new().text("co\u{AD}operate")]);
     assert_eq!(texts(&flow), ["cooperate"]);
-}
-
-#[test]
-fn equal_styles_are_shared() {
-    let page = PageBuilder::new()
-        .text("plain ")
-        .span(|span| span.style.is_italic = true)
-        .text("slanted ")
-        .body()
-        .text("plain");
-    let flow = flow_of([page]);
-    assert_eq!(flow.styles.len(), 2);
-    assert_eq!(flow.tokens[0].style, flow.tokens[2].style);
-    assert!(flow.styles[flow.tokens[1].style].is_italic);
-}
-
-#[test]
-fn structure_path_is_kept_per_token() {
-    let page = PageBuilder::new()
-        .span(|span| span.structure_path = Some("Document/H1".to_owned()))
-        .text("Title\n")
-        .body()
-        .text("text");
-    let flow = flow_of([page]);
-    let path_of = |token: &Token| {
-        token
-            .structure_path
-            .map(|index| &*flow.structure_paths[index])
-    };
-    assert_eq!(path_of(&flow.tokens[0]), Some("Document/H1"));
-    assert_eq!(path_of(&flow.tokens[1]), None);
 }
 
 #[test]
@@ -328,13 +294,23 @@ fn hyphen_of_unknown_kind_joins_a_word_that_is_also_written_whole() {
 }
 
 #[test]
-fn vocabulary_spans_the_documents_it_is_collected_from() {
-    let mut broken = raw_flow_of([PageBuilder::new()
+fn words_of_every_flow_decide_about_a_hyphen_of_unknown_kind() {
+    let broken = raw_flow_of([PageBuilder::new()
         .text("well")
         .line_end_hyphen()
         .text("known")]);
     let whole = raw_flow_of([PageBuilder::new().text("well-known")]);
-    let vocabulary = Vocabulary::of([&broken, &whole]);
-    broken.join_broken_words(&vocabulary);
+    let [broken, _] = prepare([broken, whole], &Filters::default());
     assert_eq!(texts(&broken), ["well", "-", "known"]);
+}
+
+#[test]
+fn hyphen_whose_mark_names_other_text_counts_as_unmarked() {
+    let page = PageBuilder::new()
+        .text("inter")
+        .actual_text("other")
+        .line_end_hyphen()
+        .body()
+        .text("national");
+    assert_eq!(texts(&flow_of([page])), ["international"]);
 }

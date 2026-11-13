@@ -1,6 +1,7 @@
 //! The text of a document as one flow of tokens, across page boundaries.
 
 mod builder;
+mod hyphen_marks;
 mod join;
 #[cfg(test)]
 mod tests;
@@ -9,28 +10,43 @@ use std::borrow::Cow;
 
 use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfkc_quick};
 
+use crate::filter::Filters;
 use crate::geometry::{Rect, Size};
-use crate::reader::{ReadError, Reader, Style};
+use crate::reader::{ReadError, Reader};
 
 pub use self::builder::FlowBuilder;
-pub use self::join::Vocabulary;
+use self::join::Vocabulary;
+
+/// Gets flows as [`Flow::read`] returns them ready to be compared with each
+/// other.
+///
+/// First the filters decide which tokens take part in the comparison.
+/// Then the words that a line break splits are rejoined, which has to come
+/// second: a word joins the next token that takes part, and the words of all
+/// the flows together tell what a hyphen is where the producer does not.
+pub fn prepare<const N: usize>(mut flows: [Flow; N], filters: &Filters) -> [Flow; N] {
+    for flow in &mut flows {
+        filters.apply(flow);
+    }
+    let vocabulary = Vocabulary::of(&flows);
+    for flow in &mut flows {
+        flow.join_broken_words(&vocabulary);
+    }
+    flows
+}
 
 /// The tokens of a document in reading order.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Flow {
     pub tokens: Vec<Token>,
-    /// The styles that [`Token::style`] refers to.
-    pub styles: Vec<Style>,
-    /// The structure paths that [`Token::structure_path`] refers to.
-    pub structure_paths: Vec<String>,
     pub page_sizes: Vec<Size>,
 }
 
 impl Flow {
     /// Reads every page of a document.
     ///
-    /// Words that a line break splits are still in two tokens;
-    /// [`Flow::join_broken_words`] rejoins them.
+    /// Words that a line break splits are still in two tokens, and no token
+    /// is left out of the comparison yet: [`prepare`] does both.
     pub fn read(reader: &dyn Reader) -> Result<Flow, ReadError> {
         let mut builder = FlowBuilder::default();
         for page_index in 0..reader.page_count() {
@@ -49,17 +65,13 @@ pub struct Token {
     pub fragments: Vec<Fragment>,
     /// The white space before the token.
     pub gap: Gap,
-    /// Index into [`Flow::styles`], of the token's first character.
-    pub style: usize,
     /// Whether the producer marked the token as an artifact.
     pub is_artifact: bool,
-    /// Index into [`Flow::structure_paths`].
-    pub structure_path: Option<usize>,
     /// Why the token is left out of the comparison, if it is.
-    /// [`Filters::apply`](crate::filter::Filters::apply) decides.
+    /// [`prepare`] decides.
     pub exclusion: Option<Exclusion>,
-    /// The hyphen that ends a line right after the token, until
-    /// [`Flow::join_broken_words`] has dealt with it.
+    /// The hyphen that ends a line right after the token, until [`prepare`]
+    /// has dealt with it.
     pub line_end_hyphen: Option<LineEndHyphen>,
 }
 

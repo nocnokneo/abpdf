@@ -1,7 +1,7 @@
 //! The PDFium shared library.
 //!
 //! PDFium keeps global state and is not thread safe, so the library is loaded
-//! once per process and every use holds the guard that [`lock`] returns.
+//! once per process and every use holds its lock.
 
 use std::env;
 use std::ops::Deref;
@@ -29,15 +29,26 @@ impl Deref for Library {
     }
 }
 
+/// The library once it is loaded, which stays so for the rest of the process.
+#[derive(Clone, Copy)]
+pub(super) struct LoadedLibrary(&'static Mutex<Library>);
+
 static LIBRARY: OnceLock<Result<Mutex<Library>, String>> = OnceLock::new();
 
-/// Exclusive use of PDFium, loading it on first use.
-///
-/// The guard must not be held across another call to `lock`.
-pub(super) fn lock() -> Result<MutexGuard<'static, Library>, ReadError> {
-    match LIBRARY.get_or_init(|| load().map(Mutex::new)) {
-        Ok(library) => Ok(library.lock().unwrap_or_else(PoisonError::into_inner)),
-        Err(reason) => Err(ReadError::EngineUnavailable(reason.clone())),
+impl LoadedLibrary {
+    /// Loads PDFium on first use.
+    pub fn get() -> Result<Self, ReadError> {
+        match LIBRARY.get_or_init(|| load().map(Mutex::new)) {
+            Ok(library) => Ok(Self(library)),
+            Err(reason) => Err(ReadError::EngineUnavailable(reason.clone())),
+        }
+    }
+
+    /// Exclusive use of PDFium.
+    ///
+    /// The guard must not be held across another call to `lock`.
+    pub fn lock(&self) -> MutexGuard<'static, Library> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 

@@ -5,15 +5,17 @@
 //! Each directory in the corpus holds `old.pdf` and `new.pdf`, and may hold
 //! the `profile.toml` to compare them with.
 
+mod common;
+
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 use std::{env, fs};
 
-use abpdf::change::Comparison;
+use abpdf::BySide;
 use abpdf::profile::Profile;
-use abpdf::reader::pdfium::PdfiumReader;
-use abpdf::redline::{self, Redline};
+
+use common::compare_and_redline;
 
 const CORPUS_VARIABLE: &str = "ABPDF_PRIVATE_CORPUS";
 
@@ -49,19 +51,14 @@ fn private_corpus_compares_the_same_every_time() {
 /// The number of changes between the documents in `directory`, and their
 /// redline.
 fn compare(directory: &Path) -> (usize, Vec<u8>) {
-    let read =
-        |file_name: &str| Arc::new(fs::read(directory.join(file_name)).expect("the PDF reads"));
-    let (old_pdf, new_pdf) = (read("old.pdf"), read("new.pdf"));
+    let pdfs = BySide::from_fn(|side| {
+        Arc::new(fs::read(directory.join(format!("{side}.pdf"))).expect("the PDF reads"))
+    });
     let profile_path = directory.join("profile.toml");
     let profile = match profile_path.is_file() {
         true => Profile::load(&profile_path).expect("the profile loads"),
         false => Profile::default(),
     };
-
-    let old = PdfiumReader::open(old_pdf.clone()).expect("old.pdf opens");
-    let new = PdfiumReader::open(new_pdf.clone()).expect("new.pdf opens");
-    let comparison = Comparison::of(&old, &new, &profile.filters).expect("the PDFs read");
-    let redline = Redline::of(&comparison, "old.pdf", "new.pdf");
-    let output = redline::write(&redline, old_pdf, new_pdf).expect("the redline is written");
-    (comparison.changes.len(), output)
+    let (comparison, _, redline) = compare_and_redline(pdfs, &profile.filters);
+    (comparison.changes.len(), redline)
 }

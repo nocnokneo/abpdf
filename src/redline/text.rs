@@ -9,10 +9,9 @@ use ttf_parser::Face;
 
 use super::Rgb;
 use super::render::fill;
+use crate::excerpt::ELLIPSIS;
 
 static FONT_DATA: &[u8] = include_bytes!("../../assets/fonts/DejaVuSans.ttf");
-
-const ELLIPSIS: char = '…';
 
 pub(super) struct TextFont {
     font: Font,

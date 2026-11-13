@@ -2,7 +2,7 @@
 //! documents it is for.
 //! The README describes the format.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::{fs, io};
 
 use regex::Regex;
@@ -17,8 +17,8 @@ pub struct Profile {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProfileError {
-    #[error("cannot read {}: {source}", path.display())]
-    Unreadable { path: PathBuf, source: io::Error },
+    #[error(transparent)]
+    Unreadable(#[from] io::Error),
     #[error("{0}")]
     Syntax(#[from] toml::de::Error),
     #[error("{name} is {value}, but a height cannot be negative")]
@@ -41,11 +41,7 @@ struct ProfileFile {
 
 impl Profile {
     pub fn load(path: &Path) -> Result<Self, ProfileError> {
-        let text = fs::read_to_string(path).map_err(|source| ProfileError::Unreadable {
-            path: path.to_owned(),
-            source,
-        })?;
-        Self::parse(&text)
+        Self::parse(&fs::read_to_string(path)?)
     }
 
     pub fn parse(text: &str) -> Result<Self, ProfileError> {
@@ -139,6 +135,6 @@ mod tests {
     #[test]
     fn file_that_is_missing_is_an_error() {
         let error = Profile::load(Path::new("no/such/profile.toml")).unwrap_err();
-        assert!(matches!(error, ProfileError::Unreadable { .. }), "{error}");
+        assert!(matches!(error, ProfileError::Unreadable(_)), "{error}");
     }
 }

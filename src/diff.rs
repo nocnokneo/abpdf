@@ -4,13 +4,12 @@ use std::ops::Range;
 
 use imara_diff::{Algorithm, Diff, InternedInput};
 
-/// A place where the sequences differ: `old` is replaced by `new`.
+use crate::BySide;
+
+/// A place where the sequences differ: the old range is replaced by the new
+/// one.
 /// Either range can be empty, but not both.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Hunk {
-    pub old: Range<usize>,
-    pub new: Range<usize>,
-}
+pub type Hunk = BySide<Range<usize>>;
 
 /// The hunks between two sequences of keys, in order.
 ///
@@ -19,10 +18,10 @@ pub struct Hunk {
 /// A match that is small next to the hunks around it is then taken to be a
 /// coincidence, such as a comma or `the` inside a rewritten passage, and
 /// becomes part of one hunk with them.
-pub fn diff(old: &[&str], new: &[&str]) -> Vec<Hunk> {
+pub fn diff(keys: &BySide<Vec<&str>>) -> Vec<Hunk> {
     let mut input = InternedInput::default();
-    input.update_before(old.iter().copied());
-    input.update_after(new.iter().copied());
+    input.update_before(keys.old.iter().copied());
+    input.update_after(keys.new.iter().copied());
     let mut diff = Diff::compute(Algorithm::Histogram, &input);
     diff.postprocess_no_heuristic(&input);
 
@@ -33,19 +32,20 @@ pub fn diff(old: &[&str], new: &[&str]) -> Vec<Hunk> {
             new: hunk.after.start as usize..hunk.after.end as usize,
         })
         .collect();
-    merge_across_small_matches(matched, &Sizes::measure(old), &Sizes::measure(new))
+    let sizes = keys.as_ref().map(|keys| Sizes::measure(keys));
+    merge_across_small_matches(matched, &sizes)
 }
 
 /// Merges neighboring hunks if the match between them is no larger than
 /// either of them, where the size of a hunk is that of its larger side.
-fn merge_across_small_matches(hunks: Vec<Hunk>, old: &Sizes, new: &Sizes) -> Vec<Hunk> {
-    let size_of = |hunk: &Hunk| old.of(&hunk.old).max(new.of(&hunk.new));
+fn merge_across_small_matches(hunks: Vec<Hunk>, sizes: &BySide<Sizes>) -> Vec<Hunk> {
+    let size_of = |hunk: &Hunk| sizes.old.of(&hunk.old).max(sizes.new.of(&hunk.new));
     let mut merged: Vec<Hunk> = Vec::with_capacity(hunks.len());
     for mut hunk in hunks {
         // Merging makes the hunk larger, which can make the match before the
         // merged hunk small in turn.
         while let Some(previous) = merged.last() {
-            let match_size = old.of(&(previous.old.end..hunk.old.start));
+            let match_size = sizes.old.of(&(previous.old.end..hunk.old.start));
             if match_size > size_of(previous) || match_size > size_of(&hunk) {
                 break;
             }
@@ -89,9 +89,8 @@ mod tests {
 
     /// The hunks between two texts, whose tokens are separated by spaces.
     fn hunks(old: &str, new: &str) -> Vec<Hunk> {
-        let old: Vec<&str> = old.split_whitespace().collect();
-        let new: Vec<&str> = new.split_whitespace().collect();
-        diff(&old, &new)
+        let texts = BySide { old, new };
+        diff(&texts.map(|text| text.split_whitespace().collect()))
     }
 
     fn hunk(old: Range<usize>, new: Range<usize>) -> Hunk {

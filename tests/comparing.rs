@@ -2,16 +2,14 @@
 
 mod common;
 
-use std::path::Path;
 use std::sync::Arc;
 
-use abpdf::change::{ChangeKind, Comparison};
+use abpdf::BySide;
+use abpdf::change::{ChangeKind, ChangeSide, Comparison};
 use abpdf::filter::Filters;
 use abpdf::profile::Profile;
-use abpdf::reader::pdfium::PdfiumReader;
-use abpdf::redline::{self, Redline};
 
-use common::{corpus, flow_of, texts};
+use common::{both, compare, compare_and_redline, corpus, corpus_path, flow_of, texts};
 
 use ChangeKind::{Deleted, Inserted, Replaced};
 
@@ -48,23 +46,17 @@ const EDITS: [(ChangeKind, &str, &str); 11] = [
     (Replaced, "Notwithstanding", "Despite"),
 ];
 
-fn revision(revision: &str, tagging: &str) -> Arc<Vec<u8>> {
-    corpus(&format!("revisions-{revision}-{tagging}.pdf"))
+/// The old and the new revision, with or without tags.
+fn revisions(tagging: &str) -> BySide<Arc<Vec<u8>>> {
+    BySide::from_fn(|side| corpus(&format!("revisions-{side}-{tagging}.pdf")))
 }
 
 fn profile() -> Profile {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus/revisions.toml");
-    Profile::load(&path).expect("the profile loads")
-}
-
-fn compare(old: Arc<Vec<u8>>, new: Arc<Vec<u8>>, filters: &Filters) -> Comparison {
-    let old = PdfiumReader::open(old).expect("the old PDF opens");
-    let new = PdfiumReader::open(new).expect("the new PDF opens");
-    Comparison::of(&old, &new, filters).expect("the PDFs read")
+    Profile::load(&corpus_path("revisions.toml")).expect("the profile loads")
 }
 
 fn compare_revisions(tagging: &str, filters: &Filters) -> Comparison {
-    compare(revision("old", tagging), revision("new", tagging), filters)
+    compare(revisions(tagging), filters)
 }
 
 fn summaries(comparison: &Comparison) -> Vec<(ChangeKind, &str, &str)> {
@@ -72,10 +64,11 @@ fn summaries(comparison: &Comparison) -> Vec<(ChangeKind, &str, &str)> {
         .changes
         .iter()
         .map(|change| {
+            let texts = change.sides.as_ref().map(ChangeSide::text);
             (
-                change.kind,
-                change.old.text.as_str(),
-                change.new.text.as_str(),
+                change.kind(),
+                texts.old.unwrap_or_default(),
+                texts.new.unwrap_or_default(),
             )
         })
         .collect()
@@ -109,8 +102,7 @@ fn numbers_that_follow_from_the_edits_are_reported_without_a_profile() {
 #[test]
 fn document_does_not_differ_from_itself() {
     for tagging in ["tagged", "untagged"] {
-        let pdf = revision("new", tagging);
-        let comparison = compare(pdf.clone(), pdf, &Filters::default());
+        let comparison = compare(both(revisions(tagging).new), &Filters::default());
         assert_eq!(comparison.changes, []);
     }
 }
@@ -120,13 +112,16 @@ fn change_is_located_on_its_text() {
     let comparison = compare_revisions("tagged", &profile().filters);
     let replaced = &comparison.changes[2];
     let word = comparison
+        .flows
         .old
         .tokens
         .iter()
         .find(|token| token.text == "calibrated")
         .expect("the old revision has the word");
-    let (area, fragment) = (replaced.old.areas[0], word.fragments[0]);
-    assert_eq!(replaced.old.areas.len(), 1);
+    let [area] = replaced.sides.old.areas() else {
+        panic!("{:?}", replaced.sides.old);
+    };
+    let fragment = word.fragments[0];
     assert_eq!(area.page_index, fragment.page_index);
     assert!(area.bounds.left < fragment.bounds.left && fragment.bounds.right < area.bounds.right);
     assert_eq!(
@@ -137,10 +132,7 @@ fn change_is_located_on_its_text() {
 
 #[test]
 fn redline_lists_the_changes_and_shows_their_pages() {
-    let (old, new) = (revision("old", "tagged"), revision("new", "tagged"));
-    let comparison = compare(old.clone(), new.clone(), &profile().filters);
-    let redline = Redline::of(&comparison, "old.pdf", "new.pdf");
-    let output = redline::write(&redline, old, new).expect("the redline is written");
+    let (_, redline, output) = compare_and_redline(revisions("tagged"), &profile().filters);
 
     let flow = flow_of(Arc::new(output));
     let page_count = flow.page_sizes.len();
@@ -185,22 +177,15 @@ fn redline_lists_the_changes_and_shows_their_pages() {
 #[test]
 fn redline_is_the_same_every_time() {
     for tagging in ["tagged", "untagged"] {
-        let write = || {
-            let (old, new) = (revision("old", tagging), revision("new", tagging));
-            let comparison = compare(old.clone(), new.clone(), &profile().filters);
-            let redline = Redline::of(&comparison, "old.pdf", "new.pdf");
-            redline::write(&redline, old, new).expect("the redline is written")
-        };
+        let write = || compare_and_redline(revisions(tagging), &profile().filters).2;
         assert_eq!(write(), write());
     }
 }
 
 #[test]
 fn redline_of_equal_documents_is_a_summary_that_says_so() {
-    let pdf = revision("old", "tagged");
-    let comparison = compare(pdf.clone(), pdf.clone(), &Filters::default());
-    let redline = Redline::of(&comparison, "old.pdf", "new.pdf");
-    let output = redline::write(&redline, pdf.clone(), pdf).expect("the redline is written");
+    let pdfs = both(revisions("tagged").old);
+    let (_, _, output) = compare_and_redline(pdfs, &Filters::default());
 
     let flow = flow_of(Arc::new(output));
     assert_eq!(flow.page_sizes.len(), 1);

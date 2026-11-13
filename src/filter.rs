@@ -30,9 +30,10 @@ pub struct Filters {
 impl Filters {
     /// Records on every token that a rule leaves out the first such rule.
     ///
+    /// The flow has to be as it was read, with one fragment per token.
     /// The patterns see all text, also what another rule leaves out, so a
     /// profile works the same whether or not the producer marks artifacts.
-    pub fn apply(&self, flow: &mut Flow) {
+    pub(crate) fn apply(&self, flow: &mut Flow) {
         for token in &mut flow.tokens {
             let page_height = flow.page_sizes[page_of(token)].height;
             token.exclusion = self.exclusion_by_position(token, page_height);

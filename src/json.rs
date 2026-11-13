@@ -45,20 +45,20 @@ pub fn write(comparison: &Comparison, mut output: impl Write) -> io::Result<()> 
 
 fn change_record(change: &Change) -> ChangeRecord<'_> {
     ChangeRecord {
-        kind: match change.kind {
+        kind: match change.kind() {
             ChangeKind::Inserted => "inserted",
             ChangeKind::Deleted => "deleted",
             ChangeKind::Replaced => "replaced",
         },
-        old: side_record(&change.old),
-        new: side_record(&change.new),
+        old: side_record(&change.sides.old),
+        new: side_record(&change.sides.new),
     }
 }
 
 fn side_record(side: &ChangeSide) -> SideRecord<'_> {
     SideRecord {
-        text: &side.text,
-        areas: side.areas.iter().map(area_record).collect(),
+        text: side.text().unwrap_or_default(),
+        areas: side.areas().iter().map(area_record).collect(),
     }
 }
 
@@ -83,14 +83,11 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
-    use crate::filter::Filters;
-    use crate::testing::{PageBuilder, raw_flow_of};
+    use crate::testing::comparison_of;
 
     fn report(old: &str, new: &str) -> Value {
-        let flow = |text| raw_flow_of([PageBuilder::new().text(text)]);
-        let comparison = Comparison::of_flows(flow(old), flow(new), &Filters::default());
         let mut output = Vec::new();
-        write(&comparison, &mut output).unwrap();
+        write(&comparison_of(old, new), &mut output).unwrap();
         assert_eq!(output.last(), Some(&b'\n'));
         serde_json::from_slice(&output).unwrap()
     }
@@ -127,6 +124,15 @@ mod tests {
         assert_eq!(
             change["old"]["areas"],
             json!([{"page": 1, "left": 40.0, "top": 0.0, "right": 40.0, "bottom": 12.0}])
+        );
+    }
+
+    #[test]
+    fn side_of_a_document_without_text_has_no_area() {
+        let report = report("", "all new");
+        assert_eq!(
+            report["changes"][0]["old"],
+            json!({"text": "", "areas": []})
         );
     }
 

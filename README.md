@@ -82,6 +82,7 @@ ignore_patterns = [
 - A side has one area for each line that its text is on.
   Pages are numbered from 1, and the edges of an area are distances in points from the left and the top edge of its page.
 - The side of a change that has no text has one area of no width, at the place where the text of the other side would be.
+  It has no area if its document has no text at all.
 
 ## Development
 
