@@ -8,7 +8,7 @@ use abpdf::geometry::{Rect, Size};
 use abpdf::reader::Reader;
 use abpdf::reader::pdfium::PdfiumReader;
 use abpdf::redline::{
-    self, Mark, MarkStyle, Redline, Rgb, Sheet, SheetLayout, SheetPage, WriteError,
+    self, Connector, Mark, MarkStyle, Redline, Rgb, Sheet, SheetLayout, SheetPage, Span, WriteError,
 };
 use abpdf::{BySide, Side};
 use pdf_writer::{Content, Finish, Name, Pdf, Ref, Str};
@@ -290,6 +290,14 @@ fn same_input_gives_the_same_bytes() {
         color: Rgb::REMOVED,
         style: MarkStyle::Highlight,
     };
+    let across_the_mark = Span {
+        top: mark.bounds.top,
+        bottom: mark.bounds.bottom,
+    };
+    let connector = |label: &str, old, new| Connector {
+        label: label.to_owned(),
+        spans: BySide { old, new },
+    };
     let page = |page_index| SheetPage {
         page_index,
         label: format!("page {}", page_index + 1),
@@ -308,6 +316,11 @@ fn same_input_gives_the_same_bytes() {
                     old: Some(page(page_index)),
                     new: Some(page(3 - page_index)),
                 },
+                connectors: vec![
+                    connector("1", Some(across_the_mark), Some(across_the_mark)),
+                    connector("2", Some(across_the_mark), None),
+                    connector("3", None, Some(across_the_mark)),
+                ],
                 ..Sheet::default()
             })
             .collect(),

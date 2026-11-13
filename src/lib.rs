@@ -7,12 +7,14 @@
 //! 3. [`flow::prepare`] leaves page furniture out of the comparison, as a
 //!    [`filter`] says, and rejoins the words that a line break splits.
 //! 4. A [`diff`] finds where the tokens of the two documents differ.
-//! 5. A [`change::Comparison`] says what each difference is and where.
+//! 5. A [`change::Comparison`] says what each difference is and where, and
+//!    which pages of the documents belong together.
 //!
 //! The outputs are rendered from the comparison: a [`redline`] PDF, a
 //! [`listing`] as text and [`json`].
 
 pub mod change;
+mod compare;
 pub mod diff;
 mod excerpt;
 pub mod filter;

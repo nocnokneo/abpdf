@@ -8,6 +8,7 @@
 //! their drawings stay vector drawings.
 
 mod layout;
+mod pairing;
 mod plan;
 mod render;
 mod summary;
@@ -101,7 +102,9 @@ pub struct Connector {
     /// Written in the middle of the band.
     pub label: String,
     /// The extent of the change on the page of each side.
-    pub spans: BySide<Span>,
+    /// The band ends in the gutter on a side without one, which is where the
+    /// sheet does not show that side of the change.
+    pub spans: BySide<Option<Span>>,
 }
 
 /// A vertical extent on a page, in distances from its top edge.

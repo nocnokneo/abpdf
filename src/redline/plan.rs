@@ -1,5 +1,6 @@
 //! Deciding what the redline of a comparison shows.
 
+use super::pairing::{self, PagePair};
 use super::{Connector, Mark, MarkStyle, Redline, Rgb, Sheet, SheetPage, Span, Summary};
 use super::{SummaryEntry, Target};
 use crate::change::{Area, Change, ChangeSide, Comparison};
@@ -12,7 +13,7 @@ impl Redline {
     /// The names are what the documents are called on the sheets.
     pub fn of(comparison: &Comparison, names: BySide<&str>) -> Self {
         let planner = Planner { comparison, names };
-        let page_pairs = planner.page_pairs();
+        let page_pairs = pairing::page_pairs(comparison);
         let mut sheets: Vec<Sheet> = page_pairs.iter().map(|pair| planner.sheet(pair)).collect();
         planner.note_unchanged_pages(&mut sheets);
 
@@ -38,40 +39,12 @@ impl Redline {
     }
 }
 
-/// The indices of the pages that a sheet shows.
-/// A side has none if the changes on the sheet are nowhere in its document.
-type PagePair = BySide<Option<usize>>;
-
-/// What sheets are sorted by: they are in the order of the new document.
-fn sheet_order(pair: &PagePair) -> (Option<usize>, Option<usize>) {
-    (pair.new, pair.old)
-}
-
 struct Planner<'a> {
     comparison: &'a Comparison,
     names: BySide<&'a str>,
 }
 
 impl Planner<'_> {
-    /// The pairs of pages that together show both sides of every change, in
-    /// the order of their sheets.
-    ///
-    /// A change that is on several pages pairs them in order, and repeats the
-    /// last page of the side that has fewer.
-    fn page_pairs(&self) -> Vec<PagePair> {
-        let mut pairs: Vec<PagePair> = Vec::new();
-        for change in &self.comparison.changes {
-            let pages = change.sides.as_ref().map(ChangeSide::page_indices);
-            for position in 0..pages.old.len().max(pages.new.len()) {
-                let page_at = |pages: &Vec<usize>| pages.get(position).or(pages.last()).copied();
-                pairs.push(pages.as_ref().map(page_at));
-            }
-        }
-        pairs.sort_by_key(sheet_order);
-        pairs.dedup();
-        pairs
-    }
-
     fn sheet(&self, pair: &PagePair) -> Sheet {
         let connectors = self
             .comparison
@@ -80,12 +53,11 @@ impl Planner<'_> {
             .enumerate()
             .filter_map(|(index, change)| {
                 let span = |side: Side| span_on(&change.sides[side], pair[side]?);
-                Some(Connector {
+                let spans = BySide::from_fn(span);
+                let is_on_sheet = spans.old.is_some() || spans.new.is_some();
+                is_on_sheet.then(|| Connector {
                     label: (index + 1).to_string(),
-                    spans: BySide {
-                        old: span(Side::Old)?,
-                        new: span(Side::New)?,
-                    },
+                    spans,
                 })
             })
             .collect();
@@ -186,14 +158,14 @@ fn span_on(change_side: &ChangeSide, page_index: usize) -> Option<Span> {
         })
 }
 
-/// Where to look for a change: on the sheet of the pages it starts on, which
-/// is the first sheet that shows all of it that can be shown, at its new
-/// side or else at its old one.
+/// Where to look for a change: on the first sheet that shows the pages it
+/// starts on, at its new side or else at its old one.
 fn target_of(change: &Change, page_pairs: &[PagePair]) -> Target {
-    let first_pages = change.sides.as_ref().map(ChangeSide::first_page_index);
+    let first_pages = pairing::first_pages_of(change);
     let sheet_index = page_pairs
-        .binary_search_by_key(&sheet_order(&first_pages), sheet_order)
-        .expect("every change has a sheet for its first pages");
+        .iter()
+        .position(|pair| pairing::shows(pair, &first_pages))
+        .expect("every change has a sheet for the pages it starts on");
     let top_on = |side: Side| Some(span_on(&change.sides[side], first_pages[side]?)?.top);
     let top = top_on(Side::New).or_else(|| top_on(Side::Old));
     Target {
@@ -272,8 +244,8 @@ mod tests {
             [Connector {
                 label: "1".to_owned(),
                 spans: BySide {
-                    old: line,
-                    new: line,
+                    old: Some(line),
+                    new: Some(line),
                 },
             }]
         );
@@ -332,24 +304,67 @@ mod tests {
             "page five new",
         ];
         let redline = redline(&old, &new);
-        // The first change runs on to a new page that has no old page of its
-        // own, which is shown next to the old page of the change.
+        // The first change runs on to a new page that shares no text with
+        // an old page, which is shown alone.
         assert_eq!(
             shown_pages(&redline),
-            [(Some(2), Some(2)), (Some(2), Some(3)), (Some(4), Some(5))]
+            [(Some(2), Some(2)), (None, Some(3)), (Some(4), Some(5))]
         );
     }
 
     #[test]
-    fn change_over_several_pages_pairs_them_in_order() {
-        let redline = redline(&["keep old", "words", "end"], &["keep end"]);
+    fn page_that_a_change_continues_on_is_shown_next_to_its_partner() {
+        let old = ["alpha beta", "gamma delta"];
+        let new = ["alpha added words", "more beta", "gamma delta"];
+        let redline = redline(&old, &new);
+        // The second new page has `beta` of the first old page.
         assert_eq!(
             shown_pages(&redline),
-            [(Some(0), Some(0)), (Some(1), Some(0))]
+            [(Some(0), Some(0)), (Some(0), Some(1))]
         );
-        // The second sheet shows the rest of the removed text next to the
-        // place it was removed from.
-        assert_eq!(redline.sheets[1].connectors.len(), 1);
+        let has_both_ends =
+            |connector: &Connector| connector.spans.old.is_some() && connector.spans.new.is_some();
+        let mut connectors = redline.sheets.iter().flat_map(|sheet| &sheet.connectors);
+        assert!(connectors.all(has_both_ends));
+    }
+
+    #[test]
+    fn page_that_a_change_continues_on_is_shown_alone_without_a_partner() {
+        let redline = redline(&["keep old", "words", "end"], &["keep end"]);
+        assert_eq!(shown_pages(&redline), [(Some(0), Some(0)), (Some(1), None)]);
+        // The band of the change ends in the gutter of the second sheet,
+        // which does not show the place that the text was removed from.
+        let line = Span {
+            top: 0.0,
+            bottom: CELL_HEIGHT,
+        };
+        assert_eq!(
+            redline.sheets[1].connectors,
+            [Connector {
+                label: "1".to_owned(),
+                spans: BySide {
+                    old: Some(line),
+                    new: None,
+                },
+            }]
+        );
+    }
+
+    #[test]
+    fn sheet_without_a_new_page_comes_where_its_old_page_belongs() {
+        let old = [
+            "first stays",
+            "second stays",
+            "third keep old",
+            "words",
+            "end",
+        ];
+        let new = ["first stays", "second changed", "third keep end"];
+        let redline = redline(&old, &new);
+        assert_eq!(
+            shown_pages(&redline),
+            [(Some(1), Some(1)), (Some(2), Some(2)), (Some(3), None)]
+        );
     }
 
     #[test]
@@ -432,7 +447,6 @@ mod tests {
         let no_pages: [&str; 0] = [];
         let redline = redline(&no_pages, &["\nall new"]);
         assert_eq!(shown_pages(&redline), [(None, Some(0))]);
-        assert_eq!(redline.sheets[0].connectors, []);
 
         let [entry] = entries(&redline) else {
             panic!("{:?}", entries(&redline));
