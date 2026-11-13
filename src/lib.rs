@@ -4,13 +4,25 @@
 //!
 //! 1. A [`reader`] reports the text of each page.
 //! 2. A [`flow`] is that text as one sequence of tokens across pages.
-//! 3. A [`redline`] shows pages of the two documents side by side, with marks
-//!    drawn over them.
+//! 3. A [`filter`] leaves page furniture out of the comparison.
+//! 4. A [`diff`] finds where the tokens of the two documents differ.
+//! 5. A [`change::Comparison`] says what each difference is and where.
+//!
+//! The outputs are rendered from the comparison: a [`redline`] PDF, a
+//! [`listing`] as text and [`json`].
 
+pub mod change;
+pub mod diff;
+pub mod filter;
 pub mod flow;
 pub mod geometry;
+pub mod json;
+pub mod listing;
+pub mod profile;
 pub mod reader;
 pub mod redline;
+#[cfg(test)]
+mod testing;
 
 use std::fmt;
 

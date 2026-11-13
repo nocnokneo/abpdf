@@ -7,11 +7,16 @@ description = "Compare two PDFs and get a side-by-side redline PDF"
 repository = "https://github.com/nocnokneo/abpdf"
 
 [dependencies]
+imara-diff = { version = "0.2", default-features = false }
 krilla = { version = "0.8.2", default-features = false, features = ["pdf", "simple-text"] }
 # The feature names the PDFium release whose API is bound.
 # mise.toml installs that release.
 pdfium-render = { version = "0.9.5", default-features = false, features = ["pdfium_8125"] }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 thiserror = "2"
+toml = "1"
 unicode-normalization = "0.1"
 unicode-segmentation = "1"
 
