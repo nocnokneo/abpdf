@@ -186,7 +186,6 @@ pub(super) fn bookmark_title(index: usize, entry: &SummaryEntry) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Side;
 
     fn entry(old_text: &str, new_text: &str) -> SummaryEntry {
         SummaryEntry {
@@ -195,7 +194,6 @@ mod tests {
             new_text: new_text.to_owned(),
             target: Target {
                 sheet_index: 0,
-                side: Side::New,
                 top: 0.0,
             },
         }

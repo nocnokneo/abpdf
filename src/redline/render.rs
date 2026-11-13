@@ -106,7 +106,7 @@ fn destination_of(
     layouts: &[SheetLayout],
     sheet_page_offset: usize,
 ) -> XyzDestination {
-    let frame = layouts[target.sheet_index].frame(target.side);
+    let frame = layouts[target.sheet_index].frame(Side::New);
     let top = (frame.top + target.top - TARGET_HEADROOM).max(0.0);
     XyzDestination::new(
         sheet_page_offset + target.sheet_index,

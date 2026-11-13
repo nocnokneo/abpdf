@@ -46,11 +46,10 @@ pub struct SummaryEntry {
     pub target: Target,
 }
 
-/// A place on a source page on a sheet.
+/// A place on the new page of a sheet.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Target {
     pub sheet_index: usize,
-    pub side: Side,
     /// The distance from the top edge of the page.
     pub top: f32,
 }

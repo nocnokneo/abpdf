@@ -53,10 +53,11 @@ struct PagePair {
 }
 
 impl PagePair {
-    fn page_index(&self, side: Side) -> usize {
-        match side {
-            Side::Old => self.old_page_index,
-            Side::New => self.new_page_index,
+    /// The pages on which the two sides of a change start.
+    fn of_first_pages(change: &Change) -> Self {
+        Self {
+            old_page_index: change.old.areas[0].page_index,
+            new_page_index: change.new.areas[0].page_index,
         }
     }
 }
@@ -68,11 +69,12 @@ struct Planner<'a> {
 }
 
 impl Planner<'_> {
-    /// The pairs of pages that together show both sides of every change.
+    /// The pairs of pages that together show both sides of every change, in
+    /// the order of their sheets.
     ///
     /// A change that is on several pages pairs them in order, and repeats the
     /// last page of the side that has fewer.
-    fn page_pairs(&self) -> BTreeSet<PagePair> {
+    fn page_pairs(&self) -> Vec<PagePair> {
         let mut pairs = BTreeSet::new();
         for change in &self.comparison.changes {
             let old_pages = change.old.page_indices();
@@ -84,7 +86,7 @@ impl Planner<'_> {
                 });
             }
         }
-        pairs
+        pairs.into_iter().collect()
     }
 
     fn sheet(&self, pair: &PagePair) -> Sheet {
@@ -205,30 +207,19 @@ fn span_on(change: &Change, side: Side, page_index: usize) -> Option<Span> {
         })
 }
 
-/// Where to look for a change: on the first sheet that shows both of its
-/// sides, or else on the first that shows one.
-fn target_of(change: &Change, page_pairs: &BTreeSet<PagePair>) -> Target {
-    let on_sheet = |sheet_index: usize, pair: &PagePair, side: Side| {
-        let span = span_on(change, side, pair.page_index(side))?;
-        Some(Target {
-            sheet_index,
-            side,
-            top: span.top,
-        })
-    };
-    let sheets = || page_pairs.iter().enumerate();
-    let with_both_sides = sheets().find_map(|(sheet_index, pair)| {
-        on_sheet(sheet_index, pair, Side::Old)?;
-        on_sheet(sheet_index, pair, Side::New)
-    });
-    let with_one_side = || {
-        sheets().find_map(|(sheet_index, pair)| {
-            on_sheet(sheet_index, pair, Side::New).or(on_sheet(sheet_index, pair, Side::Old))
-        })
-    };
-    with_both_sides
-        .or_else(with_one_side)
-        .expect("every change has a sheet for its first pages")
+/// Where to look for a change: on the sheet of the pages it starts on, which
+/// is the first sheet that shows both of its sides.
+fn target_of(change: &Change, page_pairs: &[PagePair]) -> Target {
+    let first_pages = PagePair::of_first_pages(change);
+    let sheet_index = page_pairs
+        .binary_search(&first_pages)
+        .expect("every change has a sheet for its first pages");
+    let span = span_on(change, Side::New, first_pages.new_page_index)
+        .expect("a change has an area on its first page");
+    Target {
+        sheet_index,
+        top: span.top,
+    }
 }
 
 #[cfg(test)]
@@ -438,7 +429,6 @@ mod tests {
                 new_text: "new".to_owned(),
                 target: Target {
                     sheet_index: 0,
-                    side: Side::New,
                     top: LINE_PITCH,
                 },
             }]
@@ -446,16 +436,15 @@ mod tests {
     }
 
     #[test]
-    fn summary_entry_links_to_the_first_sheet_that_shows_both_sides() {
-        // The removed text starts on a page whose sheet only shows it, and
-        // goes on to the page that the kept text is on.
+    fn summary_entry_links_to_the_sheet_of_the_pages_a_change_starts_on() {
+        // The removed text is on two old pages, each of which is shown next
+        // to the new page that the text is gone from.
         let redline = redline(&["start", "old", "more kept"], &["start kept"]);
         assert_eq!(
             shown_pages(&redline),
             [(Some(1), Some(0)), (Some(2), Some(0))]
         );
         assert_eq!(entries(&redline)[0].target.sheet_index, 0);
-        assert_eq!(redline.sheets[0].connectors.len(), 1);
     }
 
     #[test]
