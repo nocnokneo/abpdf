@@ -1,13 +1,17 @@
-//! The redline: a PDF of sheets, each showing an old page on the left and a
-//! new page on the right, with marks drawn over them.
+//! The redline: a PDF with a summary of the changes and then sheets, each
+//! showing an old page on the left and a new page on the right with the
+//! changes marked.
 //!
-//! A [`Redline`] describes the document as plain data, and [`write`] renders
-//! it.
+//! A [`Redline`] describes the document as plain data.
+//! [`Redline::of`] plans it for a comparison, and [`write()`] renders it.
 //! The source pages are embedded as they are, so their text stays text and
 //! their drawings stay vector drawings.
 
 mod layout;
+mod plan;
 mod render;
+mod summary;
+mod text;
 
 use std::sync::Arc;
 
@@ -20,7 +24,35 @@ use crate::geometry::{Rect, Size};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Redline {
+    /// The pages that list the changes, which come before the sheets.
+    pub summary: Option<Summary>,
     pub sheets: Vec<Sheet>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Summary {
+    pub title: String,
+    pub entries: Vec<SummaryEntry>,
+}
+
+/// One change in the summary.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SummaryEntry {
+    /// Where the change is in the documents, for a reader.
+    pub location: String,
+    pub old_text: String,
+    pub new_text: String,
+    /// Where the sheets show the change, which the entry links to.
+    pub target: Target,
+}
+
+/// A place on a source page on a sheet.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Target {
+    pub sheet_index: usize,
+    pub side: Side,
+    /// The distance from the top edge of the page.
+    pub top: f32,
 }
 
 /// One page of the redline.
@@ -28,6 +60,11 @@ pub struct Redline {
 pub struct Sheet {
     pub old: Option<SheetPage>,
     pub new: Option<SheetPage>,
+    pub connectors: Vec<Connector>,
+    /// A line of text above the pages.
+    pub note_above: Option<String>,
+    /// A line of text below the pages.
+    pub note_below: Option<String>,
 }
 
 impl Sheet {
@@ -62,6 +99,24 @@ pub enum MarkStyle {
     /// Tints what is under it, as a highlighter pen does.
     Highlight,
     Outline,
+    /// A line down the left edge, to mark a place between two characters.
+    Caret,
+}
+
+/// A band across the gutter that joins the two sides of a change.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Connector {
+    /// Written in the middle of the band.
+    pub label: String,
+    pub old: Span,
+    pub new: Span,
+}
+
+/// A vertical extent on a page, in distances from its top edge.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Span {
+    pub top: f32,
+    pub bottom: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

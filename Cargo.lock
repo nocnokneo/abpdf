@@ -15,6 +15,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "toml",
+ "ttf-parser",
  "unicode-normalization",
  "unicode-segmentation",
 ]

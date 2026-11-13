@@ -62,6 +62,21 @@ impl SheetLayout {
     pub(super) fn label_baseline(&self) -> f32 {
         BANNER - 20.0
     }
+
+    /// The baseline of the note above the frames.
+    pub(super) fn note_above_baseline(&self) -> f32 {
+        BANNER - 7.0
+    }
+
+    /// The baseline of the note below the frames.
+    pub(super) fn note_below_baseline(&self) -> f32 {
+        self.size.height - 6.0
+    }
+
+    /// The horizontal extent of the gutter between the frames.
+    pub(super) fn gutter(&self) -> (f32, f32) {
+        (self.old_frame.right, self.new_frame.left)
+    }
 }
 
 fn frame(left: f32, page: Size) -> Rect {
