@@ -1,0 +1,10 @@
+# The profile for comparing the revisions of manual.typ.
+
+ignore_patterns = [
+    # The leaders of the table of contents and the page numbers after them.
+    '(?m)((?:\. ){4,}\d+)$',
+    # Section numbers, where a line starts with one.
+    '(?m)^(\d+(?:\.\d+)+) ',
+    # Figure and table numbers.
+    '(?:Figure|Table) (\d+)',
+]

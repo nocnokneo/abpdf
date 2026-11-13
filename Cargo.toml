@@ -7,6 +7,7 @@ description = "Compare two PDFs and get a side-by-side redline PDF"
 repository = "https://github.com/nocnokneo/abpdf"
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }
 imara-diff = { version = "0.2", default-features = false }
 krilla = { version = "0.8.2", default-features = false, features = ["pdf", "simple-text"] }
 # The feature names the PDFium release whose API is bound.

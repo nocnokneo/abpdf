@@ -28,9 +28,11 @@ TYPST_IGNORE_SYSTEM_FONTS = "true"
 
 [tasks.check]
 description = "Everything that CI checks"
+env = { RUSTDOCFLAGS = "--deny warnings" }
 run = [
   "cargo fmt --check",
   "cargo clippy --all-targets -- --deny warnings",
+  "cargo doc --no-deps",
   "cargo test",
 ]
 
@@ -39,6 +41,10 @@ description = "Rebuild the test PDFs that are checked in from their Typst source
 run = [
   "typst compile tests/corpus/reading.typ tests/corpus/reading-tagged.pdf",
   "typst compile --no-pdf-tags tests/corpus/reading.typ tests/corpus/reading-untagged.pdf",
+  "typst compile --input revision=old tests/corpus/revisions.typ tests/corpus/revisions-old-tagged.pdf",
+  "typst compile --input revision=new tests/corpus/revisions.typ tests/corpus/revisions-new-tagged.pdf",
+  "typst compile --no-pdf-tags --input revision=old tests/corpus/revisions.typ tests/corpus/revisions-old-untagged.pdf",
+  "typst compile --no-pdf-tags --input revision=new tests/corpus/revisions.typ tests/corpus/revisions-new-untagged.pdf",
 ]
 
 [tasks.manual]
