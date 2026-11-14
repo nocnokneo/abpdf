@@ -4,10 +4,11 @@ mod common;
 
 use std::sync::Arc;
 
-use abpdf::BySide;
 use abpdf::change::{ChangeKind, ChangeSide, Comparison};
 use abpdf::filter::Filters;
+use abpdf::flow::Exclusion;
 use abpdf::profile::Profile;
+use abpdf::{BySide, Side};
 
 use common::{both, compare, compare_and_redline, corpus, corpus_path, page_texts};
 
@@ -75,20 +76,26 @@ fn summaries(comparison: &Comparison) -> Vec<(ChangeKind, &str, &str)> {
 }
 
 #[test]
-fn tagged_revisions_differ_by_their_edits() {
-    let comparison = compare_revisions("tagged", &profile().filters);
-    assert_eq!(summaries(&comparison), EDITS);
+fn revisions_differ_by_their_edits() {
+    for tagging in ["tagged", "untagged"] {
+        let comparison = compare_revisions(tagging, &profile().filters);
+        assert_eq!(summaries(&comparison), EDITS, "{tagging}");
+    }
 }
 
 #[test]
-fn untagged_revisions_also_differ_by_the_table_header_that_a_page_break_repeats() {
-    let comparison = compare_revisions("untagged", &profile().filters);
-    let header = "Parameter Meaning Default";
-    let mut expected = EDITS.to_vec();
+fn table_header_that_a_page_break_repeats_is_left_out_without_tags() {
     // The table breaks one row later in the new revision, and without tags
-    // nothing says that the header after the break is a repeat.
-    expected.splice(7..7, [(Inserted, "", header), (Deleted, header, "")]);
-    assert_eq!(summaries(&comparison), expected);
+    // nothing but its place says that the header after the break is a repeat.
+    let comparison = compare_revisions("untagged", &profile().filters);
+    for side in Side::BOTH {
+        let excluded = comparison.flows[side].excluded.iter();
+        let repeats: Vec<&str> = excluded
+            .filter(|excluded| excluded.exclusion == Exclusion::Repeat)
+            .map(|excluded| excluded.token.text.as_str())
+            .collect();
+        assert_eq!(repeats, ["Parameter", "Meaning", "Default"], "{side}");
+    }
 }
 
 #[test]

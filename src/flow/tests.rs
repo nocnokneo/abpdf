@@ -1,13 +1,19 @@
 use super::*;
+use crate::BySide;
 use crate::filter::Filters;
 use crate::testing::{
     CELL_HEIGHT, CELL_WIDTH, LINE_PITCH, PageBuilder, excluded_texts, raw_flow_of, texts,
 };
 
-/// The flow of a document with these pages, as the comparison sees it.
+/// The flow of a document with these pages, as a comparison with itself sees
+/// it.
 fn flow_of(pages: impl IntoIterator<Item = PageBuilder>) -> Flow {
-    let [flow] = prepare([raw_flow_of(pages)], &Filters::default());
-    flow
+    let raw = raw_flow_of(pages);
+    let flows = BySide {
+        old: raw.clone(),
+        new: raw,
+    };
+    prepare(flows, &Filters::default()).new
 }
 
 #[test]
@@ -296,7 +302,11 @@ fn words_of_every_flow_decide_about_a_hyphen_of_unknown_kind() {
         .line_end_hyphen()
         .text("known")]);
     let whole = raw_flow_of([PageBuilder::new().text("well-known")]);
-    let [broken, _] = prepare([broken, whole], &Filters::default());
+    let flows = BySide {
+        old: broken,
+        new: whole,
+    };
+    let broken = prepare(flows, &Filters::default()).old;
     assert_eq!(texts(&broken), ["well", "-", "known"]);
 }
 
@@ -309,4 +319,19 @@ fn hyphen_whose_mark_names_other_text_counts_as_unmarked() {
         .body()
         .text("national");
     assert_eq!(texts(&flow_of([page])), ["international"]);
+}
+
+#[test]
+fn word_joins_across_a_page_break_and_the_header_that_the_page_repeats() {
+    let first_page = PageBuilder::new()
+        .text("Running title\nan inter")
+        .line_end_hyphen();
+    let second_page = PageBuilder::new().text("Running title\nnational one");
+    let flow = flow_of([first_page, second_page]);
+    assert_eq!(
+        texts(&flow),
+        ["Running", "title", "an", "international", "one"]
+    );
+    assert_eq!(excluded_texts(&flow), ["Running", "title"]);
+    assert_eq!(flow.excluded[0].exclusion, Exclusion::Repeat);
 }

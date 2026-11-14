@@ -15,8 +15,7 @@ use crate::flow::{self, RawFlow};
 
 impl Comparison {
     pub fn of(flows: BySide<RawFlow>, filters: &Filters) -> Self {
-        let [old, new] = flow::prepare([flows.old, flows.new], filters);
-        let flows = BySide { old, new };
+        let flows = flow::prepare(flows, filters);
         let sequences = flows.as_ref().map(Sequence::whole);
         let hunks = diff::diff(&sequences.as_ref().map(Sequence::keys));
         let page_partners = partners::page_partners(&sequences, &hunks);

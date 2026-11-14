@@ -32,10 +32,9 @@ pub fn raw_flow_of(pdf: Arc<Vec<u8>>) -> RawFlow {
     RawFlow::read(&reader).expect("the PDF reads")
 }
 
-/// The flow of a PDF as the comparison sees it.
+/// The flow of a PDF as a comparison with itself sees it.
 pub fn flow_of(pdf: Arc<Vec<u8>>) -> Flow {
-    let [flow] = flow::prepare([raw_flow_of(pdf)], &Filters::default());
-    flow
+    flow::prepare(both(raw_flow_of(pdf)), &Filters::default()).new
 }
 
 /// The same value for both documents.

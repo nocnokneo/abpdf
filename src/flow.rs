@@ -6,6 +6,7 @@
 mod builder;
 mod hyphen_marks;
 mod join;
+mod repeats;
 #[cfg(test)]
 mod tests;
 
@@ -13,6 +14,7 @@ use std::borrow::Cow;
 
 use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfkc_quick};
 
+use crate::BySide;
 use crate::filter::Filters;
 use crate::geometry::{Rect, Size};
 use crate::reader::{ReadError, Reader};
@@ -20,20 +22,22 @@ use crate::reader::{ReadError, Reader};
 pub use self::builder::FlowBuilder;
 use self::join::Vocabulary;
 
-/// Gets flows ready to be compared with each other.
+/// Gets two documents ready to be compared with each other.
 ///
-/// First the filters decide which tokens take part in the comparison.
+/// First it is decided which tokens take part in the comparison: the filters
+/// leave tokens out, and then what the pages repeat at their tops is left
+/// out, which the filters have to uncover where a header stands above it.
 /// Then the words that a line break splits are rejoined, which has to come
-/// second: a word joins the next token that takes part, and the words of all
-/// the flows together tell what a hyphen is where the producer does not.
-pub fn prepare<const N: usize>(flows: [RawFlow; N], filters: &Filters) -> [Flow; N] {
-    let exclusions = flows.each_ref().map(|flow| filters.exclusions(flow));
-    let vocabulary = Vocabulary::of(flows.iter().zip(&exclusions));
-    let mut exclusions = exclusions.into_iter();
-    flows.map(|flow| {
-        let exclusions = exclusions.next().expect("one list per flow");
-        join::join(flow, exclusions, &vocabulary)
-    })
+/// last: a word joins the next token that takes part, and the words of both
+/// documents together tell what a hyphen is where the producer does not.
+pub fn prepare(flows: BySide<RawFlow>, filters: &Filters) -> BySide<Flow> {
+    let mut exclusions = flows.as_ref().map(|flow| filters.exclusions(flow));
+    repeats::exclude(&flows, &mut exclusions);
+    let vocabulary = Vocabulary::of([(&flows.old, &exclusions.old), (&flows.new, &exclusions.new)]);
+    BySide {
+        old: join::join(flows.old, exclusions.old, &vocabulary),
+        new: join::join(flows.new, exclusions.new, &vocabulary),
+    }
 }
 
 /// The tokens of a document in reading order, as they are read.
@@ -93,10 +97,14 @@ impl Token {
     /// The form of the text that is compared: compatibility characters such as
     /// ligatures are folded into their plain equivalents.
     pub fn key(&self) -> Cow<'_, str> {
-        match is_nfkc_quick(self.text.chars()) {
-            IsNormalized::Yes => Cow::Borrowed(&self.text),
-            _ => Cow::Owned(self.text.nfkc().collect()),
-        }
+        key_of(&self.text)
+    }
+}
+
+fn key_of(text: &str) -> Cow<'_, str> {
+    match is_nfkc_quick(text.chars()) {
+        IsNormalized::Yes => Cow::Borrowed(text),
+        _ => Cow::Owned(text.nfkc().collect()),
     }
 }
 
@@ -141,6 +149,9 @@ pub enum Exclusion {
     Footer,
     /// The ignore pattern with this index matched the token.
     Pattern(usize),
+    /// The token repeats, at the top of its page, text of the page before,
+    /// and the other document has no text for it.
+    Repeat,
 }
 
 /// A hyphen that ends a line in the middle of a word.

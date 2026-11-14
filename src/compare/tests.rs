@@ -5,6 +5,7 @@ use std::ops::Range;
 use crate::BySide;
 use crate::change::{Area, Change, ChangeKind, ChangeSide, Comparison};
 use crate::filter::Filters;
+use crate::flow::{Exclusion, Flow};
 use crate::testing::{PageBuilder, cell_bounds, comparison_of, raw_flow_of};
 
 fn compare_with(
@@ -262,4 +263,128 @@ fn change_next_to_text_that_is_left_out_does_not_cover_it() {
     let changes = compare_with([page("old")], [page("new")], &Filters::default());
     assert_eq!(summaries(&changes), [(ChangeKind::Replaced, "old", "new")]);
     assert_eq!(changes[0].sides.old.areas(), [cells(0, 0, 0..3)]);
+}
+
+/// The two pages of a table of four rows, of which `rows_on_first_page` come
+/// before the page break and the others after the header that it repeats.
+fn table_over_two_pages(header: &str, rows_on_first_page: usize) -> [PageBuilder; 2] {
+    let rows = ["a 1", "b 2", "c 3", "d 4"];
+    let (before, after) = rows.split_at(rows_on_first_page);
+    let first_page = format!("intro text\n{header}\n{}", before.join("\n"));
+    let second_page = format!("{header}\n{}\nend", after.join("\n"));
+    [
+        PageBuilder::new().text(&first_page),
+        PageBuilder::new().text(&second_page),
+    ]
+}
+
+fn excluded_as_repeats(flow: &Flow) -> Vec<&str> {
+    let repeats = flow.excluded.iter();
+    repeats
+        .filter(|excluded| excluded.exclusion == Exclusion::Repeat)
+        .map(|excluded| excluded.token.text.as_str())
+        .collect()
+}
+
+#[test]
+fn header_that_a_page_break_repeats_is_not_a_change_where_the_break_moves() {
+    let flows = BySide {
+        old: raw_flow_of(table_over_two_pages("Key Value", 2)),
+        new: raw_flow_of(table_over_two_pages("Key Value", 1)),
+    };
+    let comparison = Comparison::of(flows, &Filters::default());
+    assert_eq!(comparison.changes, []);
+    assert_eq!(excluded_as_repeats(&comparison.flows.old), ["Key", "Value"]);
+    assert_eq!(excluded_as_repeats(&comparison.flows.new), ["Key", "Value"]);
+}
+
+#[test]
+fn header_that_only_one_document_repeats_is_not_a_change() {
+    let on_one_page = [PageBuilder::new().text("intro text\nKey Value\na 1\nb 2\nc 3\nd 4\nend")];
+    let over_two_pages = table_over_two_pages("Key Value", 3);
+    assert_eq!(
+        compare_with(on_one_page, over_two_pages, &Filters::default()),
+        []
+    );
+}
+
+#[test]
+fn change_to_a_repeated_header_is_reported_where_the_header_is_first() {
+    let old = table_over_two_pages("Key Value", 2);
+    let new = table_over_two_pages("Key Amount", 2);
+    let changes = compare_with(old, new, &Filters::default());
+    assert_eq!(
+        summaries(&changes),
+        [(ChangeKind::Replaced, "Value", "Amount")]
+    );
+    assert_eq!(changes[0].location(), "old p. 1 / new p. 1");
+}
+
+#[test]
+fn line_that_stands_twice_is_not_taken_for_a_repeat() {
+    // Where the pages break, the second of two equal lines starts a page.
+    let on_one_page = [PageBuilder::new().text("a b\nx y\nx y\nc d")];
+    let over_two_pages = || {
+        [
+            PageBuilder::new().text("a b\nx y"),
+            PageBuilder::new().text("x y\nc d"),
+        ]
+    };
+    let flows = BySide {
+        old: raw_flow_of(on_one_page),
+        new: raw_flow_of(over_two_pages()),
+    };
+    let comparison = Comparison::of(flows, &Filters::default());
+    assert_eq!(comparison.changes, []);
+    assert_eq!(excluded_as_repeats(&comparison.flows.new), [""; 0]);
+
+    // The line is a change where the other document does not have it.
+    let without_the_line = [PageBuilder::new().text("a b\nx y\nc d\nmore")];
+    let with_more = [
+        PageBuilder::new().text("a b\nx y"),
+        PageBuilder::new().text("x y\nc d\nmore"),
+    ];
+    let changes = compare_with(over_two_pages(), without_the_line, &Filters::default());
+    assert_eq!(summaries(&changes), [(ChangeKind::Inserted, "", "more")]);
+    let changes = compare_with(with_more, over_two_pages(), &Filters::default());
+    assert_eq!(summaries(&changes), [(ChangeKind::Deleted, "more", "")]);
+}
+
+#[test]
+fn single_token_is_not_taken_for_a_repeat() {
+    let old = [
+        PageBuilder::new().text("a b\nx"),
+        PageBuilder::new().text("c d"),
+    ];
+    let new = [
+        PageBuilder::new().text("a b\nx"),
+        PageBuilder::new().text("x\nc d"),
+    ];
+    let changes = compare_with(old, new, &Filters::default());
+    assert_eq!(summaries(&changes), [(ChangeKind::Inserted, "", "x")]);
+}
+
+#[test]
+fn line_at_another_place_across_the_page_is_not_taken_for_a_repeat() {
+    let old = [
+        PageBuilder::new().text("a b\nx y"),
+        PageBuilder::new().text("c d"),
+    ];
+    let new = [
+        PageBuilder::new().text("a b\nx y"),
+        PageBuilder::new().text(" x y\nc d"),
+    ];
+    let changes = compare_with(old, new, &Filters::default());
+    assert_eq!(summaries(&changes), [(ChangeKind::Inserted, "", "x y")]);
+}
+
+#[test]
+fn change_to_a_running_header_is_reported_on_the_first_page_only() {
+    let pages = |revision: &str| {
+        ["one", "two", "three"]
+            .map(|body| PageBuilder::new().text(&format!("Manual revision {revision}\n{body}")))
+    };
+    let changes = compare_with(pages("A"), pages("B"), &Filters::default());
+    assert_eq!(summaries(&changes), [(ChangeKind::Replaced, "A", "B")]);
+    assert_eq!(changes[0].location(), "old p. 1 / new p. 1");
 }

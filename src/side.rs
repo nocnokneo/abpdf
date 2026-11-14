@@ -1,7 +1,7 @@
 //! The two documents of a comparison, and what each of them has.
 
 use std::fmt;
-use std::ops::Index;
+use std::ops::{Index, IndexMut};
 
 /// One of the two documents that are compared.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -71,6 +71,15 @@ impl<T> Index<Side> for BySide<T> {
         match side {
             Side::Old => &self.old,
             Side::New => &self.new,
+        }
+    }
+}
+
+impl<T> IndexMut<Side> for BySide<T> {
+    fn index_mut(&mut self, side: Side) -> &mut T {
+        match side {
+            Side::Old => &mut self.old,
+            Side::New => &mut self.new,
         }
     }
 }

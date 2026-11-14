@@ -2,9 +2,10 @@
 
 mod common;
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use abpdf::flow::{Flow, Token};
+use abpdf::flow::{Exclusion, Flow, Token};
 use abpdf::reader::pdfium::PdfiumReader;
 use abpdf::reader::{Color, Page, ReadError, Reader, Span, TextItem};
 
@@ -135,20 +136,31 @@ fn page_furniture_is_excluded_when_the_producer_marks_it() {
 
 #[test]
 fn table_header_is_excluded_where_it_repeats() {
-    let flow = tagged();
     fn pages_of_header<'a>(tokens: impl IntoIterator<Item = &'a Token>) -> Vec<usize> {
         let headers = tokens.into_iter().filter(|token| token.text == "Key");
         headers.map(|token| token.fragments[0].page_index).collect()
     }
     // The table starts on the second page and continues on two more.
-    assert_eq!(pages_of_header(&flow.tokens), [1]);
-    let excluded = flow.excluded.iter().map(|excluded| &excluded.token);
-    assert_eq!(pages_of_header(excluded), [2, 3]);
+    // With tags the producer says that its header repeats there, and
+    // without them its place at the top of the pages does.
+    for flow in [tagged(), untagged()] {
+        assert_eq!(pages_of_header(&flow.tokens), [1]);
+        let excluded = flow.excluded.iter().map(|excluded| &excluded.token);
+        assert_eq!(pages_of_header(excluded), [2, 3]);
+    }
 }
 
 #[test]
-fn nothing_is_excluded_without_tags() {
-    assert_eq!(untagged().excluded, []);
+fn without_tags_only_what_pages_repeat_at_their_tops_is_excluded() {
+    let flow = untagged();
+    let mut excluded = flow.excluded.iter();
+    assert!(excluded.all(|excluded| excluded.exclusion == Exclusion::Repeat));
+
+    let excluded_tokens = flow.excluded.iter().map(|excluded| &excluded.token);
+    let excluded_texts: BTreeSet<&str> = texts(excluded_tokens).into_iter().collect();
+    // The running header and the header of the table.
+    let repeated = ["Draft", "Key", "Reading", "Value", "corpus"];
+    assert_eq!(excluded_texts, BTreeSet::from(repeated));
 }
 
 #[test]
