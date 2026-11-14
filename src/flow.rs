@@ -4,9 +4,9 @@
 //! [`prepare`] makes of it the [`Flow`] that is compared.
 
 mod builder;
+mod furniture;
 mod hyphen_marks;
 mod join;
-mod repeats;
 #[cfg(test)]
 mod tests;
 
@@ -25,8 +25,9 @@ use self::join::Vocabulary;
 /// Gets two documents ready to be compared with each other.
 ///
 /// First it is decided which tokens take part in the comparison: the filters
-/// leave tokens out, and then what the pages repeat at their tops is left
-/// out, which the filters have to uncover where a header stands above it.
+/// leave tokens out, and then what stands where page furniture does is left
+/// out, which the filters have to uncover where they leave out a header
+/// above it.
 /// Then the words that a line break splits are rejoined, which has to come
 /// last: a word joins the next token that takes part, and the words of both
 /// documents together tell what a hyphen is where the producer does not.
@@ -35,7 +36,7 @@ pub fn prepare(flows: BySide<RawFlow>, filters: &Filters) -> BySide<Flow> {
         exclusions: filters.exclusions(&flow),
         flow,
     });
-    repeats::exclude(&mut screened);
+    furniture::exclude(&mut screened);
     let vocabulary = Vocabulary::of(&screened);
     screened.map(|screened| join::join(screened, &vocabulary))
 }
@@ -163,6 +164,12 @@ pub enum Exclusion {
     Header,
     /// The token is in the band at the bottom of its page.
     Footer,
+    /// The token is in a line at the top of its page that a page nearby has
+    /// too, and the other document has no text for it.
+    RunningHeader,
+    /// The token is in a line at the bottom of its page that a page nearby
+    /// has too, and the other document has no text for it.
+    RunningFooter,
     /// The ignore pattern with this index matched the token.
     Pattern(usize),
     /// The token repeats, at the top of its page, text of the page before,

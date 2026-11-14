@@ -324,14 +324,113 @@ fn hyphen_whose_mark_names_other_text_counts_as_unmarked() {
 #[test]
 fn word_joins_across_a_page_break_and_the_header_that_the_page_repeats() {
     let first_page = PageBuilder::new()
-        .text("Running title\nan inter")
+        .text("intro\nKey Value\nan inter")
         .line_end_hyphen();
-    let second_page = PageBuilder::new().text("Running title\nnational one");
+    let second_page = PageBuilder::new().text("Key Value\nnational one");
     let flow = flow_of([first_page, second_page]);
     assert_eq!(
         texts(&flow),
-        ["Running", "title", "an", "international", "one"]
+        ["intro", "Key", "Value", "an", "international", "one"]
     );
-    assert_eq!(excluded_texts(&flow), ["Running", "title"]);
+    assert_eq!(excluded_texts(&flow), ["Key", "Value"]);
     assert_eq!(flow.excluded[0].exclusion, Exclusion::Repeat);
+}
+
+/// The texts of the tokens that are left out as running headers and as
+/// running footers.
+fn running(flow: &Flow) -> (Vec<&str>, Vec<&str>) {
+    let texts_of = |exclusion: Exclusion| {
+        let excluded = flow.excluded.iter();
+        excluded
+            .filter(|excluded| excluded.exclusion == exclusion)
+            .map(|excluded| excluded.token.text.as_str())
+            .collect()
+    };
+    (
+        texts_of(Exclusion::RunningHeader),
+        texts_of(Exclusion::RunningFooter),
+    )
+}
+
+#[test]
+fn lines_that_pages_share_at_their_tops_and_bottoms_are_left_out() {
+    let flow = flow_of([
+        PageBuilder::new().text("The manual\none\nIssue A"),
+        PageBuilder::new().text("The manual\ntwo\nIssue A"),
+    ]);
+    assert_eq!(texts(&flow), ["one", "two"]);
+    assert_eq!(
+        running(&flow),
+        (
+            vec!["The", "manual", "The", "manual"],
+            vec!["Issue", "A", "Issue", "A"]
+        )
+    );
+}
+
+#[test]
+fn page_number_counts_on_in_a_running_footer() {
+    let flow = flow_of([
+        PageBuilder::new().text("one\nPage 9 of 11"),
+        PageBuilder::new().text("two\nPage 10 of 11"),
+        PageBuilder::new().text("three\nPage 11 of 11"),
+    ]);
+    assert_eq!(texts(&flow), ["one", "two", "three"]);
+}
+
+#[test]
+fn number_that_does_not_count_the_pages_is_not_a_page_number() {
+    let flow = flow_of([
+        PageBuilder::new().text("one\nItem 9"),
+        PageBuilder::new().text("two\nItem 11"),
+    ]);
+    assert_eq!(texts(&flow), ["one", "Item", "9", "two", "Item", "11"]);
+}
+
+#[test]
+fn left_and_right_pages_can_have_their_own_running_headers() {
+    let flow = flow_of([
+        PageBuilder::new().text("2 The manual\none"),
+        PageBuilder::new().text("Operation 3\ntwo"),
+        PageBuilder::new().text("4 The manual\nthree"),
+        PageBuilder::new().text("Operation 5\nfour"),
+    ]);
+    assert_eq!(texts(&flow), ["one", "two", "three", "four"]);
+}
+
+#[test]
+fn line_runs_only_at_the_same_height() {
+    let flow = flow_of([
+        PageBuilder::new().text("same words\none"),
+        PageBuilder::new().text("\nsame words\ntwo"),
+    ]);
+    assert_eq!(running(&flow), (vec![], vec![]));
+}
+
+#[test]
+fn line_beyond_one_that_does_not_run_stays() {
+    let flow = flow_of([
+        PageBuilder::new().text("The manual\none\nsame words\nmore of one\nIssue A"),
+        PageBuilder::new().text("The manual\ntwo\nsame words\nmore of two\nIssue A"),
+    ]);
+    assert_eq!(
+        texts(&flow),
+        [
+            "one", "same", "words", "more", "of", "one", "two", "same", "words", "more", "of",
+            "two"
+        ]
+    );
+}
+
+#[test]
+fn producer_that_marks_artifacts_says_what_its_headers_are() {
+    let page = |body: &str| {
+        PageBuilder::new()
+            .text("Same first line\n")
+            .text(body)
+            .artifact()
+            .text("\nfooter")
+    };
+    let flow = flow_of([page("one"), page("two")]);
+    assert_eq!(running(&flow), (vec![], vec![]));
 }

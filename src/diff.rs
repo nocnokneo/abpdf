@@ -55,19 +55,6 @@ pub(crate) fn matches(hunks: &[Hunk], lengths: BySide<usize>) -> Vec<Match> {
     matches
 }
 
-/// The indices below `len` that are in none of `ranges`, which ascend.
-pub(crate) fn indices_outside(
-    len: usize,
-    ranges: &[Range<usize>],
-) -> impl Iterator<Item = usize> + '_ {
-    let starts = iter::once(0).chain(ranges.iter().map(|range| range.end));
-    let ends = ranges
-        .iter()
-        .map(|range| range.start)
-        .chain(iter::once(len));
-    starts.zip(ends).flat_map(|(start, end)| start..end)
-}
-
 /// Merges neighboring hunks if the match between them is small next to them.
 fn merge_across_small_matches(hunks: Vec<Hunk>, sizes: &Sizes) -> Vec<Hunk> {
     let mut merged: Vec<Hunk> = Vec::with_capacity(hunks.len());
@@ -157,13 +144,6 @@ mod tests {
             [hunk(1..3, 0..2), hunk(4..6, 5..7)]
         );
         assert_eq!(matches(&[], lengths.map(|_| 2)), [hunk(0..2, 0..2)]);
-    }
-
-    #[test]
-    fn indices_outside_ranges_skip_what_is_in_them() {
-        let outside = |ranges: &[Range<usize>]| indices_outside(6, ranges).collect::<Vec<_>>();
-        assert_eq!(outside(&[]), [0, 1, 2, 3, 4, 5]);
-        assert_eq!(outside(&[0..2, 3..3, 4..6]), [2, 3]);
     }
 
     #[test]

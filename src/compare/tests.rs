@@ -312,6 +312,36 @@ fn header_that_only_one_document_repeats_is_not_a_change() {
 }
 
 #[test]
+fn header_of_a_table_that_starts_a_page_is_compared() {
+    // The header stands at the top of two pages in a row, like a running
+    // header, but the other document has it as text.
+    let from_the_top_of_a_page = [
+        PageBuilder::new().text("intro text"),
+        PageBuilder::new().text("Key Value\na 1\nb 2"),
+        PageBuilder::new().text("Key Value\nc 3\nd 4\nend"),
+    ];
+    let changes = compare_with(
+        from_the_top_of_a_page,
+        table_over_two_pages("Key Value", 2),
+        &Filters::default(),
+    );
+    assert_eq!(changes, []);
+}
+
+#[test]
+fn change_to_a_running_header_or_footer_is_not_reported() {
+    let pages = |revision: &str, page_count: usize| {
+        ["one", "two", "three"].map(|body| {
+            PageBuilder::new().text(&format!(
+                "Manual revision {revision}\n{body}\nof {page_count}"
+            ))
+        })
+    };
+    let changes = compare_with(pages("A", 3), pages("B", 4), &Filters::default());
+    assert_eq!(changes, []);
+}
+
+#[test]
 fn change_to_a_repeated_header_is_reported_where_the_header_is_first() {
     let old = table_over_two_pages("Key Value", 2);
     let new = table_over_two_pages("Key Amount", 2);
@@ -379,17 +409,6 @@ fn line_at_another_place_across_the_page_is_not_taken_for_a_repeat() {
     ];
     let changes = compare_with(old, new, &Filters::default());
     assert_eq!(summaries(&changes), [(ChangeKind::Inserted, "", "x y")]);
-}
-
-#[test]
-fn change_to_a_running_header_is_reported_on_the_first_page_only() {
-    let pages = |revision: &str| {
-        ["one", "two", "three"]
-            .map(|body| PageBuilder::new().text(&format!("Manual revision {revision}\n{body}")))
-    };
-    let changes = compare_with(pages("A"), pages("B"), &Filters::default());
-    assert_eq!(summaries(&changes), [(ChangeKind::Replaced, "A", "B")]);
-    assert_eq!(changes[0].location(), "old p. 1 / new p. 1");
 }
 
 #[test]

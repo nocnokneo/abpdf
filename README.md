@@ -56,9 +56,14 @@ abpdf compares words and punctuation marks, and ignores how the text is broken i
 Text that the producer of the PDF marked as an artifact is not compared.
 In a tagged PDF from Typst that covers headers, footers, the leaders of the table of contents, table headers that are repeated after a page break, and text in `pdf.artifact`.
 
-Text that a page repeats at its top is not compared either: a running header, or the header of a table that continues from the page before.
-abpdf takes for such a repeat the first lines of a page that also stand on the page before, with the same words at the same places across the page.
-A repeat is still compared where the other document has the same text and does not repeat it there.
+Where nothing is marked, abpdf tells such page furniture by its place and does not compare it either:
+
+- A running header or footer is a line at the top or the bottom of a page that one of the two pages before or after it has too, at the same height and with the same words.
+  A number in it may count the pages.
+  Running headers and footers are only looked for in a PDF without artifacts.
+- The header of a table that continues from the page before is one of the first lines of a page that also stand on the page before, with the same words at the same places across the page.
+
+Text at such a place is still compared where the other document has the same text and not as page furniture.
 
 Text that stands at another place in the new document is reported as moved, if it has at least 20 characters.
 Where moved text also changed a little, what changed is reported as a change of its own.
@@ -69,7 +74,8 @@ A profile is a TOML file with what else to ignore.
 Every setting is optional.
 
 ```toml
-# Text within these distances of the top and the bottom edge of a page.
+# Text within these distances of the top and the bottom edge of a page,
+# for headers and footers that are not found by themselves.
 header_height_points = 95
 footer_height_points = 50
 

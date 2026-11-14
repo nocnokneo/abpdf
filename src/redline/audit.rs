@@ -10,6 +10,7 @@ use crate::flow::{Exclusion, Flow};
 
 const ARTIFACT_COLOR: Rgb = Rgb::new(128, 128, 128);
 const HEADER_AND_FOOTER_COLOR: Rgb = Rgb::new(153, 102, 51);
+const RUNNING_HEADER_AND_FOOTER_COLOR: Rgb = Rgb::new(120, 81, 169);
 const REPEAT_COLOR: Rgb = Rgb::new(0, 140, 140);
 /// The colors of the ignore patterns, which patterns after the last color
 /// start over with.
@@ -99,6 +100,7 @@ fn color_of(exclusion: Exclusion) -> Rgb {
     match exclusion {
         Exclusion::Artifact => ARTIFACT_COLOR,
         Exclusion::Header | Exclusion::Footer => HEADER_AND_FOOTER_COLOR,
+        Exclusion::RunningHeader | Exclusion::RunningFooter => RUNNING_HEADER_AND_FOOTER_COLOR,
         Exclusion::Pattern(index) => PATTERN_COLORS[index % PATTERN_COLORS.len()],
         Exclusion::Repeat => REPEAT_COLOR,
     }
@@ -109,6 +111,9 @@ fn description_of(exclusion: Exclusion) -> String {
         Exclusion::Artifact => "marked as an artifact by the producer of the PDF".to_owned(),
         Exclusion::Header | Exclusion::Footer => {
             "within the height of the header or the footer".to_owned()
+        }
+        Exclusion::RunningHeader | Exclusion::RunningFooter => {
+            "a header or a footer that runs from page to page".to_owned()
         }
         Exclusion::Pattern(index) => format!("matched by ignore pattern {}", index + 1),
         Exclusion::Repeat => "repeated at the top of a page".to_owned(),

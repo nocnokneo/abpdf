@@ -93,10 +93,14 @@ fn pages_are_measured_in_points() {
 
 #[test]
 fn positions_are_measured_from_the_top_left_corner() {
-    let flow = untagged();
+    let flow = raw_flow_of(corpus("reading-untagged.pdf"));
     let page_height = flow.page_sizes[0].height;
-    let header = token(&flow, "Reading").fragments[0].bounds;
-    let footer = token(&flow, "Page").fragments[0].bounds;
+    let bounds_of = |text: &str| {
+        let token = flow.tokens.iter().find(|token| token.text == text);
+        token.expect("the page has the text").fragment.bounds
+    };
+    let header = bounds_of("Reading");
+    let footer = bounds_of("Page");
 
     let side_margin = 1.5 * POINTS_PER_CENTIMETER;
     let top_and_bottom_margin = 2.0 * POINTS_PER_CENTIMETER;
@@ -151,16 +155,28 @@ fn table_header_is_excluded_where_it_repeats() {
 }
 
 #[test]
-fn without_tags_only_what_pages_repeat_at_their_tops_is_excluded() {
+fn page_furniture_is_excluded_by_its_place_when_nothing_marks_it() {
     let flow = untagged();
+    let texts_excluded_as = |exclusion: Exclusion| -> BTreeSet<&str> {
+        let excluded = flow.excluded.iter();
+        excluded
+            .filter(|excluded| excluded.exclusion == exclusion)
+            .map(|excluded| excluded.token.text.as_str())
+            .collect()
+    };
+    // The running header, and the header of the table on the two pages that
+    // start with it.
+    assert_eq!(
+        texts_excluded_as(Exclusion::RunningHeader),
+        BTreeSet::from(["Draft", "Key", "Reading", "Value", "corpus"])
+    );
+    assert_eq!(
+        texts_excluded_as(Exclusion::RunningFooter),
+        BTreeSet::from(["1", "2", "3", "4", "Page", "of"])
+    );
+    let by_place = [Exclusion::RunningHeader, Exclusion::RunningFooter];
     let mut excluded = flow.excluded.iter();
-    assert!(excluded.all(|excluded| excluded.exclusion == Exclusion::Repeat));
-
-    let excluded_tokens = flow.excluded.iter().map(|excluded| &excluded.token);
-    let excluded_texts: BTreeSet<&str> = texts(excluded_tokens).into_iter().collect();
-    // The running header and the header of the table.
-    let repeated = ["Draft", "Key", "Reading", "Value", "corpus"];
-    assert_eq!(excluded_texts, BTreeSet::from(repeated));
+    assert!(excluded.all(|excluded| by_place.contains(&excluded.exclusion)));
 }
 
 #[test]
