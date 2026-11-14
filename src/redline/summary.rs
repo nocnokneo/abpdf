@@ -6,7 +6,7 @@ use krilla::destination::XyzDestination;
 use krilla::page::PageSettings;
 use krilla::surface::Surface;
 
-use super::render::{OUTLINE_LINE_WIDTH, stroke_rects};
+use super::paint::{OUTLINE_LINE_WIDTH, stroke_rects};
 use super::text::TextFont;
 use super::{Rgb, Summary, SummaryEntry, SummaryLine};
 use crate::excerpt::shortened;

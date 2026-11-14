@@ -1,21 +1,19 @@
 //! Drawing a [`Redline`] with krilla.
 
 use krilla::blend::BlendMode;
-use krilla::color::rgb;
 use krilla::configure::{ConfigurationBuilder, PdfVersion};
 use krilla::destination::XyzDestination;
 use krilla::error::KrillaError;
 use krilla::geom::{PathBuilder, Point, Transform};
 use krilla::metadata::Metadata;
-use krilla::num::NormalizedF32;
 use krilla::outline::{Outline, OutlineNode};
 use krilla::page::PageSettings;
-use krilla::paint::{Fill, Stroke};
 use krilla::surface::Surface;
 use krilla::{Document, SerializeSettings};
 
 use super::Target;
 use super::connector;
+use super::paint::{OUTLINE_LINE_WIDTH, fill, path_of_rects, stroke, stroke_rects};
 use super::summary::{self, SummaryPages};
 use super::text::TextFont;
 use super::{Mark, MarkStyle, Redline, Rgb, Sheet, SheetLayout, SheetPage, Source};
@@ -28,7 +26,6 @@ const NOTE_FONT_SIZE: f32 = 8.0;
 const NOTE_COLOR: Rgb = Rgb::new(115, 115, 115);
 const FRAME_COLOR: Rgb = Rgb::new(153, 153, 153);
 const FRAME_LINE_WIDTH: f32 = 0.5;
-pub(super) const OUTLINE_LINE_WIDTH: f32 = 0.4;
 const CARET_LINE_WIDTH: f32 = 1.2;
 
 /// How much of a mark's color a highlight keeps: the rest is white, so that
@@ -202,20 +199,6 @@ fn highlight_rects(surface: &mut Surface, rects: impl IntoIterator<Item = Rect>,
     surface.pop();
 }
 
-pub(super) fn stroke_rects(
-    surface: &mut Surface,
-    rects: impl IntoIterator<Item = Rect>,
-    color: Rgb,
-    line_width: f32,
-) {
-    let Some(path) = path_of_rects(rects) else {
-        return;
-    };
-    surface.set_fill(None);
-    surface.set_stroke(Some(stroke(color, line_width)));
-    surface.draw_path(&path);
-}
-
 fn stroke_left_edges(surface: &mut Surface, rects: impl IntoIterator<Item = Rect>, color: Rgb) {
     let mut builder = PathBuilder::new();
     for rect in rects {
@@ -228,37 +211,6 @@ fn stroke_left_edges(surface: &mut Surface, rects: impl IntoIterator<Item = Rect
     surface.set_fill(None);
     surface.set_stroke(Some(stroke(color, CARET_LINE_WIDTH)));
     surface.draw_path(&path);
-}
-
-fn path_of_rects(rects: impl IntoIterator<Item = Rect>) -> Option<krilla::geom::Path> {
-    let mut builder = PathBuilder::new();
-    for rect in rects {
-        let rect = krilla::geom::Rect::from_ltrb(rect.left, rect.top, rect.right, rect.bottom);
-        if let Some(rect) = rect {
-            builder.push_rect(rect);
-        }
-    }
-    builder.finish()
-}
-
-pub(super) fn fill(color: Rgb) -> Fill {
-    Fill {
-        paint: krilla_color(color).into(),
-        opacity: NormalizedF32::ONE,
-        rule: Default::default(),
-    }
-}
-
-pub(super) fn stroke(color: Rgb, line_width: f32) -> Stroke {
-    Stroke {
-        paint: krilla_color(color).into(),
-        width: line_width,
-        ..Stroke::default()
-    }
-}
-
-fn krilla_color(color: Rgb) -> rgb::Color {
-    rgb::Color::new(color.red, color.green, color.blue)
 }
 
 /// Mixes `strength` of the color with white.

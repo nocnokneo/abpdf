@@ -5,7 +5,7 @@ use krilla::num::NormalizedF32;
 use krilla::paint::Fill;
 use krilla::surface::Surface;
 
-use super::render::{fill, stroke};
+use super::paint::{fill, stroke};
 use super::text::TextFont;
 use super::{Connector, Rgb, SheetLayout};
 use crate::Side;

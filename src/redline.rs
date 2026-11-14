@@ -12,6 +12,7 @@
 mod audit;
 mod connector;
 mod layout;
+mod paint;
 mod pairing;
 mod plan;
 mod render;
