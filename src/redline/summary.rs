@@ -6,10 +6,11 @@ use krilla::destination::XyzDestination;
 use krilla::page::PageSettings;
 use krilla::surface::Surface;
 
+use super::render::{OUTLINE_LINE_WIDTH, stroke_rects};
 use super::text::TextFont;
 use super::{Rgb, Summary, SummaryEntry, SummaryLine};
 use crate::excerpt::shortened;
-use crate::geometry::Size;
+use crate::geometry::{Rect, Size};
 
 /// The page size of a summary without sheets to take it from: A4 on its side.
 const DEFAULT_PAGE_SIZE: Size = Size {
@@ -23,6 +24,9 @@ const FONT_SIZE: f32 = 9.0;
 const LINE_HEIGHT: f32 = 12.5;
 /// The space that the title and the line under it take on the first page.
 const HEADING_HEIGHT: f32 = 58.0;
+const LEGEND_FIRST_LINE: &str = "Text with an outline was left out of the comparison:";
+/// The height of the outline that shows a color of the legend.
+const LEGEND_SAMPLE_SIZE: f32 = 6.0;
 const ENTRY_GAP: f32 = 5.0;
 
 /// The right edge of the column of change numbers.
@@ -57,7 +61,7 @@ impl SummaryPages {
         let page_size = sheet_size.unwrap_or(DEFAULT_PAGE_SIZE);
         let bottom = page_size.height - MARGIN;
         let mut pages = vec![Vec::new()];
-        let mut top = MARGIN + HEADING_HEIGHT;
+        let mut top = MARGIN + heading_height(summary);
         for (index, entry) in summary.entries.iter().enumerate() {
             let is_first_on_page = pages.last().is_some_and(Vec::is_empty);
             if top + height_of(entry) > bottom && !is_first_on_page {
@@ -74,6 +78,16 @@ impl SummaryPages {
     pub fn count(&self) -> usize {
         self.pages.len()
     }
+}
+
+/// The space that the heading takes on the first page: the title, the line
+/// under it and the legend, if there is one, under its own first line.
+fn heading_height(summary: &Summary) -> f32 {
+    let legend_lines = match summary.legend.len() {
+        0 => 0,
+        entries => 1 + entries,
+    };
+    HEADING_HEIGHT + legend_lines as f32 * LINE_HEIGHT
 }
 
 fn height_of(entry: &SummaryEntry) -> f32 {
@@ -128,8 +142,39 @@ fn draw_heading(
     let title_position = (MARGIN, MARGIN + 14.0);
     font.draw(surface, title_position, TITLE_FONT_SIZE, TEXT_COLOR, &title);
     let counts = counts_line(summary.entries.len(), sheet_count);
-    let counts_position = (MARGIN, MARGIN + 34.0);
-    font.draw(surface, counts_position, FONT_SIZE, TEXT_COLOR, &counts);
+    let counts_baseline = MARGIN + 34.0;
+    font.draw(
+        surface,
+        (MARGIN, counts_baseline),
+        FONT_SIZE,
+        TEXT_COLOR,
+        &counts,
+    );
+
+    if summary.legend.is_empty() {
+        return;
+    }
+    let legend_baseline = counts_baseline + 1.5 * LINE_HEIGHT;
+    let legend_position = (MARGIN, legend_baseline);
+    font.draw(
+        surface,
+        legend_position,
+        FONT_SIZE,
+        TEXT_COLOR,
+        LEGEND_FIRST_LINE,
+    );
+    for (line_index, entry) in summary.legend.iter().enumerate() {
+        let baseline = legend_baseline + (line_index + 1) as f32 * LINE_HEIGHT;
+        let sample = Rect {
+            left: MARGIN,
+            top: baseline - LEGEND_SAMPLE_SIZE,
+            right: MARGIN + 2.0 * LEGEND_SAMPLE_SIZE,
+            bottom: baseline,
+        };
+        stroke_rects(surface, [sample], entry.color, OUTLINE_LINE_WIDTH);
+        let text_position = (sample.right + LEGEND_SAMPLE_SIZE, baseline);
+        font.draw(surface, text_position, FONT_SIZE, TEXT_COLOR, &entry.text);
+    }
 }
 
 fn draw_entry(
@@ -195,7 +240,7 @@ pub(super) fn bookmark_title(index: usize, entry: &SummaryEntry) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::redline::Target;
+    use crate::redline::{LegendEntry, Target};
 
     /// An entry for a change with these texts.
     fn entry(old_text: Option<&str>, new_text: Option<&str>) -> SummaryEntry {
@@ -219,6 +264,7 @@ mod tests {
     fn summary_of(entries: Vec<SummaryEntry>) -> Summary {
         Summary {
             title: "old → new".to_owned(),
+            legend: Vec::new(),
             entries,
         }
     }
@@ -277,6 +323,28 @@ mod tests {
                 vec![MARGIN + HEADING_HEIGHT],
                 vec![MARGIN, MARGIN + LINE_HEIGHT + ENTRY_GAP]
             ]
+        );
+    }
+
+    #[test]
+    fn entries_start_under_the_legend_if_there_is_one() {
+        let first_entry_top = |legend: Vec<LegendEntry>| {
+            let summary = Summary {
+                legend,
+                ..summary_of(vec![entry(Some("old"), None)])
+            };
+            SummaryPages::of(&summary, None).pages[0][0].top
+        };
+        let legend_entry = || LegendEntry {
+            color: Rgb::new(128, 128, 128),
+            text: "left out".to_owned(),
+        };
+        let without_legend = first_entry_top(Vec::new());
+        assert_eq!(without_legend, MARGIN + HEADING_HEIGHT);
+        // A line for each entry of the legend, and one that introduces them.
+        assert_eq!(
+            first_entry_top(vec![legend_entry(), legend_entry()]),
+            without_legend + 3.0 * LINE_HEIGHT
         );
     }
 

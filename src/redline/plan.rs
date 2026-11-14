@@ -1,5 +1,8 @@
 //! Deciding what the redline of a comparison shows.
 
+use std::collections::BTreeSet;
+
+use super::audit;
 use super::pairing::{self, PagePair};
 use super::{Connector, Mark, MarkStyle, Redline, Rgb, Sheet, SheetPage, Span, Summary};
 use super::{SummaryEntry, SummaryLine, Target};
@@ -12,10 +15,41 @@ impl Redline {
     ///
     /// The names are what the documents are called on the sheets.
     pub fn of(comparison: &Comparison, names: BySide<&str>) -> Self {
-        let planner = Planner { comparison, names };
-        let page_pairs = pairing::page_pairs(comparison);
-        let mut sheets: Vec<Sheet> = page_pairs.iter().map(|pair| planner.sheet(pair)).collect();
-        planner.note_unchanged_pages(&mut sheets);
+        let planner = Planner {
+            comparison,
+            names,
+            shows_what_was_left_out: false,
+        };
+        planner.redline()
+    }
+
+    /// The redline for checking what a comparison leaves out.
+    ///
+    /// Besides what [`Redline::of`] shows, it has every other page of the
+    /// two documents on a sheet, and the text that was left out of the
+    /// comparison has an outline in a color that tells why.
+    pub fn audit_of(comparison: &Comparison, names: BySide<&str>) -> Self {
+        let planner = Planner {
+            comparison,
+            names,
+            shows_what_was_left_out: true,
+        };
+        planner.redline()
+    }
+}
+
+struct Planner<'a> {
+    comparison: &'a Comparison,
+    names: BySide<&'a str>,
+    shows_what_was_left_out: bool,
+}
+
+impl Planner<'_> {
+    fn redline(&self) -> Redline {
+        let comparison = self.comparison;
+        let page_pairs = pairing::page_pairs(comparison, &self.pages_to_show());
+        let mut sheets: Vec<Sheet> = page_pairs.iter().map(|pair| self.sheet(pair)).collect();
+        self.note_unchanged_pages(&mut sheets);
 
         let entries = comparison
             .changes
@@ -26,22 +60,28 @@ impl Redline {
                 target: target_of(change, &page_pairs),
             })
             .collect();
-        Self {
+        let legend = match self.shows_what_was_left_out {
+            true => audit::legend_of(comparison),
+            false => Vec::new(),
+        };
+        Redline {
             summary: Some(Summary {
-                title: format!("{} → {}", names.old, names.new),
+                title: format!("{} → {}", self.names.old, self.names.new),
+                legend,
                 entries,
             }),
             sheets,
         }
     }
-}
 
-struct Planner<'a> {
-    comparison: &'a Comparison,
-    names: BySide<&'a str>,
-}
+    /// The pages of each document that have to be on a sheet.
+    fn pages_to_show(&self) -> BySide<BTreeSet<usize>> {
+        BySide::from_fn(|side| match self.shows_what_was_left_out {
+            true => (0..self.comparison.flows[side].page_sizes.len()).collect(),
+            false => pairing::pages_with_changes(self.comparison, side),
+        })
+    }
 
-impl Planner<'_> {
     fn sheet(&self, pair: &PagePair) -> Sheet {
         let connectors = self
             .comparison
@@ -81,6 +121,9 @@ impl Planner<'_> {
                 style,
             };
             marks.extend(change_side.areas().iter().filter(on_page).map(to_mark));
+        }
+        if self.shows_what_was_left_out {
+            marks.extend(audit::marks_on(&self.comparison.flows[side], page_index));
         }
         SheetPage {
             page_index,
@@ -196,8 +239,10 @@ fn target_of(change: &Change, page_pairs: &[PagePair]) -> Target {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::filter::Filters;
     use crate::geometry::Rect;
-    use crate::testing::{CELL_HEIGHT, LINE_PITCH, cell_bounds, comparison_of_pages};
+    use crate::testing::raw_flow_of;
+    use crate::testing::{CELL_HEIGHT, LINE_PITCH, PageBuilder, cell_bounds, comparison_of_pages};
 
     /// The redline of two documents, given as the text of each of their pages.
     fn redline(old_pages: &[impl AsRef<str>], new_pages: &[impl AsRef<str>]) -> Redline {
@@ -535,6 +580,58 @@ mod tests {
                 text: paragraph.to_owned(),
             }]
         );
+    }
+
+    #[test]
+    fn audit_shows_every_page_and_outlines_what_was_left_out() {
+        let pages = |revision: &str| {
+            let page = |text: &str| {
+                PageBuilder::new()
+                    .artifact()
+                    .text("Title\n")
+                    .body()
+                    .text(text)
+            };
+            [
+                page("first page stays"),
+                page(&format!("second page is {revision}")),
+                page("third page stays"),
+            ]
+        };
+        let flows = BySide {
+            old: raw_flow_of(pages("old")),
+            new: raw_flow_of(pages("new")),
+        };
+        let comparison = Comparison::of(flows, &Filters::default());
+        let names = BySide {
+            old: "old.pdf",
+            new: "new.pdf",
+        };
+
+        let redline = Redline::of(&comparison, names);
+        assert_eq!(shown_pages(&redline), [(Some(1), Some(1))]);
+        assert_eq!(redline.summary.as_ref().unwrap().legend, []);
+        assert_eq!(redline.sheets[0].pages.new.as_ref().unwrap().marks.len(), 1);
+
+        let audit = Redline::audit_of(&comparison, names);
+        assert_eq!(
+            shown_pages(&audit),
+            [(Some(0), Some(0)), (Some(1), Some(1)), (Some(2), Some(2))]
+        );
+        assert_eq!(audit.summary.as_ref().unwrap().legend.len(), 1);
+        let styles_on = |sheet: &Sheet| -> Vec<MarkStyle> {
+            let marks = &sheet.pages.new.as_ref().unwrap().marks;
+            marks.iter().map(|mark| mark.style).collect()
+        };
+        assert_eq!(styles_on(&audit.sheets[0]), [MarkStyle::Outline]);
+        assert_eq!(
+            styles_on(&audit.sheets[1]),
+            [MarkStyle::Highlight, MarkStyle::Outline]
+        );
+        // Every page is shown, so there are no pages to say of that they
+        // have no differences.
+        let has_note = |sheet: &Sheet| sheet.note_above.is_some() || sheet.note_below.is_some();
+        assert!(!audit.sheets.iter().any(has_note));
     }
 
     #[test]

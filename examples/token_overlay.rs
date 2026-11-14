@@ -17,6 +17,8 @@ use abpdf::flow::RawFlow;
 use abpdf::reader::pdfium::PdfiumReader;
 use abpdf::redline::{self, Mark, MarkStyle, Redline, Rgb, Sheet, SheetPage};
 
+const ARTIFACT_COLOR: Rgb = Rgb::new(128, 128, 128);
+
 fn main() -> Result<(), Box<dyn Error>> {
     let arguments: Vec<String> = env::args().skip(1).collect();
     let [old_path, new_path, output_path] = arguments.as_slice() else {
@@ -96,7 +98,7 @@ fn sheet_pages(path: &str, flow: &RawFlow) -> Vec<SheetPage> {
         pages[token.fragment.page_index].marks.push(Mark {
             bounds: token.fragment.bounds,
             color: if token.is_artifact {
-                Rgb::EXCLUDED
+                ARTIFACT_COLOR
             } else {
                 Rgb::MOVED
             },

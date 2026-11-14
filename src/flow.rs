@@ -139,7 +139,7 @@ pub enum Gap {
 }
 
 /// The rule that leaves a token out of the comparison.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Exclusion {
     /// The producer marked the token as an artifact.
     Artifact,

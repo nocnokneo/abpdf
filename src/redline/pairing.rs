@@ -9,15 +9,17 @@ use crate::{BySide, Side};
 /// A side has none if nothing of its document belongs on the sheet.
 pub(super) type PagePair = BySide<Option<usize>>;
 
-/// The pairs of pages that together show every change, in the order of their
-/// sheets.
+/// The pairs of pages that together show every change and each of `pages`,
+/// in the order of their sheets.
 ///
 /// A change is shown as a whole where it starts: the pages on which its two
 /// sides start are on one sheet.
-/// Any other page that a change is on is shown next to its partner, the page
-/// of the other document that it shares most text with, or alone if it has
-/// none.
-pub(super) fn page_pairs(comparison: &Comparison) -> Vec<PagePair> {
+/// Any other page is shown next to its partner, the page of the other
+/// document that it shares most text with, or alone if it has none.
+pub(super) fn page_pairs(
+    comparison: &Comparison,
+    pages: &BySide<BTreeSet<usize>>,
+) -> Vec<PagePair> {
     let mut pairs: Vec<PagePair> = Vec::new();
     for change in &comparison.changes {
         let first_pages = first_pages_of(change);
@@ -26,7 +28,7 @@ pub(super) fn page_pairs(comparison: &Comparison) -> Vec<PagePair> {
         }
     }
     for side in [Side::New, Side::Old] {
-        for page_index in pages_with_changes(comparison, side) {
+        for &page_index in &pages[side] {
             if !pairs.iter().any(|pair| pair[side] == Some(page_index)) {
                 pairs.push(next_to_partner(comparison, side, page_index));
             }
@@ -47,7 +49,8 @@ pub(super) fn shows(pair: &PagePair, pages: &PagePair) -> bool {
     Side::BOTH.into_iter().all(shows_page_of)
 }
 
-fn pages_with_changes(comparison: &Comparison, side: Side) -> BTreeSet<usize> {
+/// The pages of one document that a change is on.
+pub(super) fn pages_with_changes(comparison: &Comparison, side: Side) -> BTreeSet<usize> {
     let changes = comparison.changes.iter();
     let areas = changes.flat_map(|change| change.sides[side].areas());
     areas.map(|area| area.page_index).collect()

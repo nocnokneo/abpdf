@@ -28,7 +28,7 @@ const NOTE_FONT_SIZE: f32 = 8.0;
 const NOTE_COLOR: Rgb = Rgb::new(115, 115, 115);
 const FRAME_COLOR: Rgb = Rgb::new(153, 153, 153);
 const FRAME_LINE_WIDTH: f32 = 0.5;
-const OUTLINE_LINE_WIDTH: f32 = 0.4;
+pub(super) const OUTLINE_LINE_WIDTH: f32 = 0.4;
 const CARET_LINE_WIDTH: f32 = 1.2;
 
 /// How much of a mark's color a highlight keeps: the rest is white, so that
@@ -202,7 +202,7 @@ fn highlight_rects(surface: &mut Surface, rects: impl IntoIterator<Item = Rect>,
     surface.pop();
 }
 
-fn stroke_rects(
+pub(super) fn stroke_rects(
     surface: &mut Surface,
     rects: impl IntoIterator<Item = Rect>,
     color: Rgb,

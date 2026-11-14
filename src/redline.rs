@@ -4,9 +4,12 @@
 //!
 //! A [`Redline`] describes the document as plain data.
 //! [`Redline::of`] plans it for a comparison, and [`write()`] renders it.
+//! [`Redline::audit_of`] plans one that also shows what the comparison left
+//! out.
 //! The source pages are embedded as they are, so their text stays text and
 //! their drawings stay vector drawings.
 
+mod audit;
 mod connector;
 mod layout;
 mod pairing;
@@ -34,7 +37,17 @@ pub struct Redline {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Summary {
     pub title: String,
+    /// What the colors of the outlines on the sheets stand for, in a redline
+    /// that outlines what was left out of the comparison.
+    pub legend: Vec<LegendEntry>,
     pub entries: Vec<SummaryEntry>,
+}
+
+/// What text was left out for that is outlined in a color.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LegendEntry {
+    pub color: Rgb,
+    pub text: String,
 }
 
 /// One change in the summary.
@@ -135,7 +148,6 @@ impl Rgb {
     pub const REMOVED: Rgb = Rgb::new(217, 38, 38);
     pub const ADDED: Rgb = Rgb::new(26, 153, 51);
     pub const MOVED: Rgb = Rgb::new(38, 89, 217);
-    pub const EXCLUDED: Rgb = Rgb::new(128, 128, 128);
 
     pub const fn new(red: u8, green: u8, blue: u8) -> Self {
         Self { red, green, blue }
