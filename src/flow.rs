@@ -17,7 +17,7 @@ use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfkc_quick};
 use crate::BySide;
 use crate::filter::Filters;
 use crate::geometry::{Rect, Size};
-use crate::reader::{ReadError, Reader};
+use crate::reader::{ReadError, Reader, Style};
 
 pub use self::builder::FlowBuilder;
 use self::join::Vocabulary;
@@ -62,6 +62,8 @@ impl Screened {
 pub struct RawFlow {
     pub tokens: Vec<RawToken>,
     pub page_sizes: Vec<Size>,
+    /// The styles that the tokens are drawn in, without repeats.
+    pub styles: Vec<Style>,
 }
 
 impl RawFlow {
@@ -84,6 +86,9 @@ pub struct RawToken {
     pub fragment: Fragment,
     /// The white space before the token.
     pub gap: Gap,
+    /// The styles of the characters, as indices into [`RawFlow::styles`]: one
+    /// for each run of characters in one style.
+    pub styles: Vec<usize>,
     /// Whether the producer marked the token as an artifact.
     pub is_artifact: bool,
     /// The hyphen that ends a line right after the token.
@@ -97,6 +102,8 @@ pub struct Flow {
     /// The tokens that are left out of the comparison.
     pub excluded: Vec<ExcludedToken>,
     pub page_sizes: Vec<Size>,
+    /// The styles that the tokens are drawn in, without repeats.
+    pub styles: Vec<Style>,
 }
 
 /// A word or a punctuation mark.
@@ -108,6 +115,9 @@ pub struct Token {
     pub fragments: Vec<Fragment>,
     /// The white space before the token.
     pub gap: Gap,
+    /// The styles of the characters, as indices into [`Flow::styles`]: one
+    /// for each run of characters in one style.
+    pub styles: Vec<usize>,
 }
 
 impl Token {

@@ -40,9 +40,9 @@ fn shared_token_counts(
     sequences: &BySide<Sequence>,
     hunks: &[Hunk],
 ) -> BTreeMap<(usize, usize), usize> {
-    let lengths = sequences.as_ref().map(|sequence| sequence.tokens.len());
+    let whole = sequences.as_ref().map(|sequence| 0..sequence.tokens.len());
     let mut counts = BTreeMap::new();
-    for matched in diff::matches(hunks, lengths) {
+    for matched in diff::matches(hunks, &whole) {
         let old_tokens = &sequences.old.tokens[matched.old];
         let new_tokens = &sequences.new.tokens[matched.new];
         for (old_token, new_token) in old_tokens.iter().zip(new_tokens) {

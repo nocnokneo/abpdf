@@ -6,7 +6,7 @@ use super::audit;
 use super::pairing::{self, PagePair};
 use super::{Connector, Mark, MarkStyle, Redline, Rgb, Sheet, SheetPage, Span, Summary};
 use super::{SummaryEntry, SummaryLine, Target};
-use crate::change::{Area, Change, ChangeSide, Comparison};
+use crate::change::{Area, Change, ChangeSide, Comparison, Difference, StyleDifference};
 use crate::{BySide, Side};
 
 impl Redline {
@@ -146,18 +146,20 @@ impl Planner<'_> {
 }
 
 /// How one side of a change is marked: its text is highlighted in the color
-/// of that side, or in that of moved text, and the place where it has none
-/// gets a caret in the color of the other side.
+/// of that side, or in that of moved or of restyled text, and the place where
+/// it has none gets a caret in the color of the other side.
 fn look_of(change: &Change, side: Side) -> (Rgb, MarkStyle) {
-    match &change.sides[side] {
-        ChangeSide::Text { .. } if change.is_move => (Rgb::MOVED, MarkStyle::Highlight),
-        ChangeSide::Text { .. } => (color_of(side), MarkStyle::Highlight),
-        ChangeSide::Absent { .. } => (color_of(side.other()), MarkStyle::Caret),
+    match (&change.sides[side], &change.difference) {
+        (ChangeSide::Absent { .. }, _) => (color_of(side.other()), MarkStyle::Caret),
+        (ChangeSide::Text { .. }, Difference::Text) => (color_of(side), MarkStyle::Highlight),
+        (ChangeSide::Text { .. }, Difference::Place) => (Rgb::MOVED, MarkStyle::Highlight),
+        (ChangeSide::Text { .. }, Difference::Style(_)) => (Rgb::RESTYLED, MarkStyle::Highlight),
     }
 }
 
 /// What the summary says of a change: the text that was removed and the text
-/// that was added, or the text that moved as the new document has it.
+/// that was added, or the text as the new document has it if it moved or is
+/// in another style, then after what differs in the style.
 fn summary_lines_of(change: &Change) -> Vec<SummaryLine> {
     let texts = change.sides.as_ref().map(ChangeSide::text);
     let line = |sign, color, text: Option<&str>| {
@@ -167,12 +169,17 @@ fn summary_lines_of(change: &Change) -> Vec<SummaryLine> {
             text: text?.to_owned(),
         })
     };
-    let lines = match change.is_move {
-        true => [line('⇄', Rgb::MOVED, texts.new), None],
-        false => [
+    let lines = match &change.difference {
+        Difference::Text => [
             line('−', color_of(Side::Old), texts.old),
             line('+', color_of(Side::New), texts.new),
         ],
+        Difference::Place => [line('⇄', Rgb::MOVED, texts.new), None],
+        Difference::Style(differences) => {
+            let differences = StyleDifference::list(differences);
+            let text = texts.new.map(|text| format!("{differences}: {text}"));
+            [line('≈', Rgb::RESTYLED, text.as_deref()), None]
+        }
     };
     lines.into_iter().flatten().collect()
 }
@@ -222,8 +229,8 @@ mod tests {
     use crate::filter::Filters;
     use crate::geometry::Rect;
     use crate::testing::{
-        CELL_HEIGHT, LINE_PITCH, PARAGRAPH, PageBuilder, REST, cell_bounds, comparison_of_pages,
-        raw_flow_of,
+        CELL_HEIGHT, LINE_PITCH, PARAGRAPH, PageBuilder, REST, cell_bounds,
+        comparison_of_built_pages, comparison_of_pages, page_with_bold, raw_flow_of,
     };
 
     /// The redline of two documents, given as the text of each of their pages.
@@ -558,6 +565,33 @@ mod tests {
                 sign: '⇄',
                 color: Rgb::MOVED,
                 text: PARAGRAPH.to_owned(),
+            }]
+        );
+    }
+
+    #[test]
+    fn text_in_another_style_is_marked_as_such_on_both_pages() {
+        let comparison =
+            comparison_of_built_pages([page_with_bold("one two")], [page_with_bold("one *two*")]);
+        let names = BySide {
+            old: "old.pdf",
+            new: "new.pdf",
+        };
+        let redline = Redline::of(&comparison, names);
+        let mark = Mark {
+            bounds: cells(4..7),
+            color: Rgb::RESTYLED,
+            style: MarkStyle::Highlight,
+        };
+        let sheet = &redline.sheets[0];
+        assert_eq!(sheet.pages.old.as_ref().unwrap().marks, [mark]);
+        assert_eq!(sheet.pages.new.as_ref().unwrap().marks, [mark]);
+        assert_eq!(
+            entries(&redline)[0].lines,
+            [SummaryLine {
+                sign: '≈',
+                color: Rgb::RESTYLED,
+                text: "weight 400 → 700: two".to_owned(),
             }]
         );
     }

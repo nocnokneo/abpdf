@@ -232,7 +232,8 @@ struct InPlace(BTreeMap<usize, usize>);
 impl InPlace {
     /// The runs between the hunks of a diff.
     fn matched_by(hunks: &[Hunk], keys: &BySide<Vec<&str>>) -> Self {
-        let matches = diff::matches(hunks, keys.as_ref().map(Vec::len));
+        let whole = keys.as_ref().map(|keys| 0..keys.len());
+        let matches = diff::matches(hunks, &whole);
         let starts = matches.iter().map(|run| (run.old.start, run.new.start));
         Self(starts.collect())
     }

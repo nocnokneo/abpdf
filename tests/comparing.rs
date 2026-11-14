@@ -13,7 +13,7 @@ use abpdf::{BySide, Side};
 use common::page_texts;
 use common::{REVISIONS_CHANGE_COUNT, both, compare, compare_and_redline, corpus, corpus_path};
 
-use ChangeKind::{Deleted, Inserted, Moved, Replaced};
+use ChangeKind::{Deleted, Inserted, Moved, Replaced, Restyled};
 
 const STORAGE_OLD: &str =
     "Store the instrument in its case when it is not in use, in a dry room that is free of dust.";
@@ -41,6 +41,7 @@ const EDITS: [(ChangeKind, &str, &str); REVISIONS_CHANGE_COUNT] = [
         "",
         "Monitoring The monitoring interface is read only.",
     ),
+    (Restyled, "Warnings", "Warnings"),
     (Deleted, "Notes are set in italic type.", ""),
     // Of the two paragraphs that change places, the shorter one moved.
     (Moved, CHECK, CHECK),
@@ -158,10 +159,8 @@ fn redline_lists_the_changes_and_shows_their_pages() {
     assert_eq!(pages.len(), 1 + redline.sheets.len());
 
     let summary = &pages[0];
-    assert!(
-        summary.starts_with("old.pdf → new.pdf 14 changes on 5 sheets"),
-        "{summary}"
-    );
+    let counts = format!("old.pdf → new.pdf {REVISIONS_CHANGE_COUNT} changes on 5 sheets");
+    assert!(summary.starts_with(&counts), "{summary}");
     assert!(
         summary.contains("shall be calibrated annually"),
         "{summary}"

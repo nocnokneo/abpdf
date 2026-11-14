@@ -4,8 +4,12 @@
 use std::io::{self, Write};
 
 use serde::Serialize;
+use serde_json::{Value, json};
 
-use crate::change::{Area, Change, ChangeKind, ChangeSide, Comparison};
+use crate::change::{
+    Area, Change, ChangeKind, ChangeSide, Comparison, Difference, StyleDifference,
+};
+use crate::geometry::hundredths;
 
 #[derive(Serialize)]
 struct Report<'a> {
@@ -17,6 +21,16 @@ struct ChangeRecord<'a> {
     kind: &'static str,
     old: SideRecord<'a>,
     new: SideRecord<'a>,
+    /// What differs in the style of text that is restyled.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    style: Vec<StyleRecord>,
+}
+
+#[derive(Serialize)]
+struct StyleRecord {
+    property: &'static str,
+    old: Value,
+    new: Value,
 }
 
 #[derive(Serialize)]
@@ -50,9 +64,35 @@ fn change_record(change: &Change) -> ChangeRecord<'_> {
             ChangeKind::Deleted => "deleted",
             ChangeKind::Replaced => "replaced",
             ChangeKind::Moved => "moved",
+            ChangeKind::Restyled => "restyled",
         },
         old: side_record(&change.sides.old),
         new: side_record(&change.sides.new),
+        style: match &change.difference {
+            Difference::Style(differences) => differences.iter().map(style_record).collect(),
+            Difference::Text | Difference::Place => Vec::new(),
+        },
+    }
+}
+
+fn style_record(difference: &StyleDifference) -> StyleRecord {
+    let (property, values) = match difference {
+        StyleDifference::Font(font) => ("font", font.as_ref().map(|font| json!(font))),
+        StyleDifference::Size(size) => ("size", size.map(|size| json!(hundredths(size)))),
+        StyleDifference::Weight(weight) => ("weight", weight.map(|weight| json!(weight))),
+        StyleDifference::Italic(is_italic) => {
+            ("italic", is_italic.map(|is_italic| json!(is_italic)))
+        }
+        StyleDifference::Color(color) => ("color", color.map(|color| json!(color.to_string()))),
+        StyleDifference::Rotation(rotation) => (
+            "rotation",
+            rotation.map(|rotation| json!(hundredths(rotation))),
+        ),
+    };
+    StyleRecord {
+        property,
+        old: values.old,
+        new: values.new,
     }
 }
 
@@ -73,18 +113,14 @@ fn area_record(area: &Area) -> AreaRecord {
     }
 }
 
-/// Rounds to hundredths of a point, which is finer than anything on a page
-/// and keeps the numbers short.
-fn hundredths(value: f32) -> f64 {
-    (f64::from(value) * 100.0).round() / 100.0
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
 
     use super::*;
-    use crate::testing::{PARAGRAPH, REST, comparison_of};
+    use crate::testing::{
+        PARAGRAPH, REST, comparison_of, comparison_of_built_pages, page_with_bold,
+    };
 
     fn report(old: &str, new: &str) -> Value {
         let mut output = Vec::new();
@@ -127,6 +163,28 @@ mod tests {
         assert_eq!(change["new"]["text"], PARAGRAPH);
         assert_eq!(change["old"]["areas"][0]["top"], 0.0);
         assert_eq!(change["new"]["areas"][0]["top"], 20.0);
+    }
+
+    #[test]
+    fn text_in_another_style_has_what_differs_in_the_style() {
+        let comparison =
+            comparison_of_built_pages([page_with_bold("one two")], [page_with_bold("one *two*")]);
+        let mut output = Vec::new();
+        write(&comparison, &mut output).unwrap();
+        let report: Value = serde_json::from_slice(&output).unwrap();
+        let change = &report["changes"][0];
+        assert_eq!(change["kind"], "restyled");
+        assert_eq!(change["old"]["text"], "two");
+        assert_eq!(
+            change["style"],
+            json!([{ "property": "weight", "old": 400, "new": 700 }])
+        );
+    }
+
+    #[test]
+    fn only_text_in_another_style_has_a_style() {
+        let report = report("keep old", "keep newer");
+        assert_eq!(report["changes"][0].get("style"), None);
     }
 
     #[test]

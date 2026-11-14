@@ -3,10 +3,15 @@ use regex::Regex;
 use std::ops::Range;
 
 use crate::BySide;
-use crate::change::{Area, Change, ChangeKind, ChangeSide, Comparison};
+use crate::change::{
+    Area, Change, ChangeKind, ChangeSide, Comparison, Difference, StyleDifference,
+};
 use crate::filter::Filters;
 use crate::flow::{Exclusion, Flow};
-use crate::testing::{PARAGRAPH, PageBuilder, REST, cell_bounds, comparison_of, raw_flow_of};
+use crate::testing::{
+    PARAGRAPH, PageBuilder, REST, bold_difference, cell_bounds, comparison_of,
+    comparison_of_built_pages, page_with_bold, raw_flow_of,
+};
 
 fn compare_with(
     old: impl IntoIterator<Item = PageBuilder>,
@@ -494,4 +499,141 @@ fn few_words_that_stand_at_another_place_are_removed_and_added() {
             (ChangeKind::Inserted, "", "to be")
         ]
     );
+}
+
+/// The changes from a page of body text to a page with the same text, of
+/// which what stands between two `*` is bold.
+fn compare_with_bold(old: &str, new: &str) -> Vec<Change> {
+    comparison_of_built_pages([page_with_bold(old)], [page_with_bold(new)]).changes
+}
+
+fn style_differences(change: &Change) -> &[StyleDifference] {
+    match &change.difference {
+        Difference::Style(differences) => differences,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn text_in_another_style_is_restyled() {
+    let changes = compare_with_bold("one two three", "one *two* three");
+    assert_eq!(summaries(&changes), [(ChangeKind::Restyled, "two", "two")]);
+    assert_eq!(style_differences(&changes[0]), [bold_difference()]);
+    assert_eq!(changes[0].sides.old.areas(), [cells(0, 0, 4..7)]);
+    assert_eq!(changes[0].sides.new.areas(), [cells(0, 0, 4..7)]);
+}
+
+#[test]
+fn words_in_a_row_that_differ_in_the_same_way_are_one_change() {
+    let changes = compare_with_bold("one two three four", "one *two three* four");
+    assert_eq!(
+        summaries(&changes),
+        [(ChangeKind::Restyled, "two three", "two three")]
+    );
+}
+
+#[test]
+fn words_in_a_row_that_differ_in_other_ways_are_separate_changes() {
+    let old = PageBuilder::new().text("one two three four");
+    let new = PageBuilder::new()
+        .text("one ")
+        .bold()
+        .text("two ")
+        .styled(|style| style.is_italic = true)
+        .text("three")
+        .body()
+        .text(" four");
+    let changes = comparison_of_built_pages([old], [new]).changes;
+    assert_eq!(
+        summaries(&changes),
+        [
+            (ChangeKind::Restyled, "two", "two"),
+            (ChangeKind::Restyled, "three", "three")
+        ]
+    );
+    let slant = BySide {
+        old: false,
+        new: true,
+    };
+    assert_eq!(
+        style_differences(&changes[1]),
+        [StyleDifference::Italic(slant)]
+    );
+}
+
+#[test]
+fn word_with_a_part_in_another_style_is_restyled() {
+    let old = PageBuilder::new().text("of H2O here");
+    let new = PageBuilder::new()
+        .text("of H")
+        .styled(|style| style.font_size = 7.0)
+        .text("2")
+        .body()
+        .text("O here");
+    let changes = comparison_of_built_pages([old], [new]).changes;
+    assert_eq!(summaries(&changes), [(ChangeKind::Restyled, "H2O", "H2O")]);
+    let size = BySide {
+        old: 10.0,
+        new: 7.0,
+    };
+    assert_eq!(
+        style_differences(&changes[0]),
+        [StyleDifference::Size(size)]
+    );
+}
+
+#[test]
+fn sizes_and_rotations_that_are_all_but_the_same_do_not_differ() {
+    let old = PageBuilder::new().text("one two");
+    let new = PageBuilder::new()
+        .styled(|style| {
+            style.font_size += 0.01;
+            style.rotation_degrees += 0.1;
+        })
+        .text("one two");
+    assert_eq!(comparison_of_built_pages([old], [new]).changes, []);
+}
+
+#[test]
+fn name_of_a_font_stands_for_its_weight_and_its_slant() {
+    let old = PageBuilder::new().text("one two");
+    let new = PageBuilder::new()
+        .text("one ")
+        .styled(|style| {
+            style.font_name = "Body-BoldItalic".to_owned();
+            style.font_weight = Some(700);
+            style.is_italic = true;
+        })
+        .text("two");
+    let changes = comparison_of_built_pages([old], [new]).changes;
+    let font = BySide {
+        old: "Body".to_owned(),
+        new: "Body-BoldItalic".to_owned(),
+    };
+    assert_eq!(
+        style_differences(&changes[0]),
+        [StyleDifference::Font(font)]
+    );
+}
+
+#[test]
+fn style_of_text_that_is_replaced_is_not_compared() {
+    let changes = compare_with_bold("one two", "one *2*");
+    assert_eq!(summaries(&changes), [(ChangeKind::Replaced, "two", "2")]);
+}
+
+#[test]
+fn style_of_text_that_moved_is_compared() {
+    let old = format!("{PARAGRAPH}\n{REST}");
+    let new = format!("{REST}\nthis *paragraph* stands somewhere else now");
+    let changes = compare_with_bold(&old, &new);
+    assert_eq!(
+        summaries(&changes),
+        [
+            (ChangeKind::Moved, PARAGRAPH, PARAGRAPH),
+            (ChangeKind::Restyled, "paragraph", "paragraph")
+        ]
+    );
+    assert_eq!(changes[1].sides.old.areas(), [cells(0, 0, 5..14)]);
+    assert_eq!(changes[1].sides.new.areas(), [cells(0, 1, 5..14)]);
 }

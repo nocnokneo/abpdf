@@ -4,6 +4,7 @@ mod moves;
 mod partners;
 mod sequence;
 mod sides;
+mod styles;
 #[cfg(test)]
 mod tests;
 
@@ -12,7 +13,7 @@ use std::ops::Range;
 use self::sequence::Sequence;
 use crate::BySide;
 use crate::change::{Change, Comparison};
-use crate::diff;
+use crate::diff::{self, Hunk};
 use crate::filter::Filters;
 use crate::flow::{self, RawFlow};
 
@@ -39,25 +40,15 @@ impl Comparison {
         };
         let page_partners = partners::page_partners(&in_place, &hunks);
 
-        // Each change with the indices in the new and in the old flow that
-        // it is at, which is what the changes are ordered by.
-        let place_of = |tokens: &BySide<Range<usize>>, sequences: &BySide<Sequence>| {
-            let place = BySide::from_fn(|side| sequences[side].index_at(tokens[side].start));
-            (place.new, place.old)
-        };
-        let mut changes: Vec<((usize, usize), Change)> = Vec::new();
-        for hunk in &hunks {
-            let change = sides::change_at(hunk, &in_place, &page_partners);
-            changes.push((place_of(hunk, &in_place), change));
-        }
+        let all_in_place = in_place.as_ref().map(|sequence| 0..sequence.tokens.len());
+        let mut changes = changes_within(&all_in_place, &hunks, &in_place, &page_partners);
         for moved in &moves {
-            let change = sides::moved(moved, &whole);
-            changes.push((place_of(&moved.tokens, &whole), change));
-            for hunk in &moved.inner_hunks {
-                let change = sides::change_at(hunk, &whole, &page_partners);
-                changes.push((place_of(hunk, &whole), change));
-            }
+            let place = (moved.tokens.new.start, moved.tokens.old.start);
+            changes.push((place, sides::moved(moved, &whole)));
+            let inside = changes_within(&moved.tokens, &moved.inner_hunks, &whole, &page_partners);
+            changes.extend(inside);
         }
+        // A move comes before the changes inside it that start where it does.
         changes.sort_by_key(|(place, _)| *place);
 
         Self {
@@ -66,4 +57,34 @@ impl Comparison {
             flows,
         }
     }
+}
+
+/// The indices in the new and in the old flow that a change is at, which is
+/// what the changes are ordered by.
+type Place = (usize, usize);
+
+/// The changes in the ranges `within` of two sequences, of which `hunks` are
+/// a diff: what differs at each hunk, and the styles that differ in the text
+/// that the hunks leave matched.
+fn changes_within(
+    within: &BySide<Range<usize>>,
+    hunks: &[Hunk],
+    sequences: &BySide<Sequence>,
+    page_partners: &BySide<Vec<Option<usize>>>,
+) -> Vec<(Place, Change)> {
+    let place_of = |positions: &BySide<Range<usize>>| {
+        let place = BySide::from_fn(|side| sequences[side].index_at(positions[side].start));
+        (place.new, place.old)
+    };
+    let mut changes = Vec::new();
+    for hunk in hunks {
+        let change = sides::change_at(hunk, sequences, page_partners);
+        changes.push((place_of(hunk), change));
+    }
+    for matched in diff::matches(hunks, within) {
+        for (positions, change) in styles::restyled(&matched, sequences) {
+            changes.push((place_of(&positions), change));
+        }
+    }
+    changes
 }

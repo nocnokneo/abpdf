@@ -2,25 +2,40 @@
 
 use std::io::{self, Write};
 
-use crate::change::{ChangeSide, Comparison};
+use crate::change::{Comparison, Difference, StyleDifference};
 use crate::excerpt::shortened;
 
 /// Longer texts are cut off, so that one change stays a few lines.
 const MAX_TEXT_CHARS: usize = 200;
 
-/// Writes each change as the pages it is on, its old text after `-` and its
-/// new text after `+`, or text that moved after `>`, and a count at the end.
+/// Writes each change as the pages it is on and what it is, and a count at
+/// the end.
+///
+/// A line with the text of a change starts with a sign:
+///
+/// - `-` before text that only the old document has
+/// - `+` before text that only the new document has
+/// - `>` before text that moved
+/// - `~` before text in another style, after what differs in the style
 pub fn write(comparison: &Comparison, mut output: impl Write) -> io::Result<()> {
     for change in &comparison.changes {
         writeln!(output, "@ {}", change.location())?;
-        let texts = change.sides.as_ref().map(ChangeSide::text);
-        let lines = match change.is_move {
-            true => vec![('>', texts.new)],
-            false => vec![('-', texts.old), ('+', texts.new)],
+        let texts = change.sides.as_ref().map(|side| {
+            let text = side.text()?;
+            Some(shortened(text, MAX_TEXT_CHARS))
+        });
+        let lines = match &change.difference {
+            Difference::Text => vec![('-', texts.old), ('+', texts.new)],
+            Difference::Place => vec![('>', texts.new)],
+            Difference::Style(differences) => {
+                let differences = StyleDifference::list(differences);
+                let line = texts.new.map(|text| format!("{differences}: {text}"));
+                vec![('~', line)]
+            }
         };
         for (sign, text) in lines {
             if let Some(text) = text {
-                writeln!(output, "{sign} {}", shortened(text, MAX_TEXT_CHARS))?;
+                writeln!(output, "{sign} {text}")?;
             }
         }
     }
@@ -34,7 +49,9 @@ pub fn write(comparison: &Comparison, mut output: impl Write) -> io::Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{PARAGRAPH, REST, comparison_of};
+    use crate::testing::{
+        PARAGRAPH, REST, comparison_of, comparison_of_built_pages, page_with_bold,
+    };
 
     fn listing(old: &str, new: &str) -> String {
         let mut output = Vec::new();
@@ -63,6 +80,18 @@ mod tests {
                 &format!("{REST}\n{PARAGRAPH}")
             ),
             format!("@ old p. 1 / new p. 1\n> {PARAGRAPH}\n1 change\n")
+        );
+    }
+
+    #[test]
+    fn text_in_another_style_is_listed_after_what_differs_in_the_style() {
+        let comparison =
+            comparison_of_built_pages([page_with_bold("one two")], [page_with_bold("one *two*")]);
+        let mut output = Vec::new();
+        write(&comparison, &mut output).unwrap();
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "@ old p. 1 / new p. 1\n~ weight 400 → 700: two\n1 change\n"
         );
     }
 

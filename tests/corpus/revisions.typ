@@ -71,7 +71,8 @@ See @maintenance #page-of(<maintenance>) for the procedure.
 
 == Conventions
 
-Warnings are set in bold type.
+// EDIT: a word becomes bold, and its text stays as it is.
+#edit([Warnings], [*Warnings*]) are set in bold type.
 // EDIT: a sentence is removed.
 #edit([Notes are set in italic type.], [])
 Dimensions are in millimeters unless stated otherwise.

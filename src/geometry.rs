@@ -67,6 +67,12 @@ impl Rect {
     }
 }
 
+/// Rounds to hundredths, which is finer than anything on a page and keeps
+/// the number short when it is written.
+pub(crate) fn hundredths(value: f32) -> f64 {
+    (f64::from(value) * 100.0).round() / 100.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

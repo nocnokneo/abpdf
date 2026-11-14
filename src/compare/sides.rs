@@ -1,9 +1,11 @@
 //! What each document has at a place where they differ.
 
+use std::ops::Range;
+
 use super::moves::Move;
 use super::sequence::Sequence;
 use crate::BySide;
-use crate::change::{Area, Change, ChangeSide};
+use crate::change::{Area, Change, ChangeSide, Difference, StyleDifference};
 use crate::diff::Hunk;
 use crate::flow::{Gap, Token};
 use crate::geometry::Rect;
@@ -33,7 +35,7 @@ pub(super) fn change_at(
     });
     Change {
         sides,
-        is_move: false,
+        difference: Difference::Text,
     }
 }
 
@@ -60,7 +62,27 @@ pub(super) fn moved(moved: &Move, sequences: &BySide<Sequence>) -> Change {
     });
     Change {
         sides,
-        is_move: true,
+        difference: Difference::Place,
+    }
+}
+
+/// The change that text in another style is: the text at `positions` of the
+/// sequences, which have the same text there.
+pub(super) fn restyled(
+    positions: &BySide<Range<usize>>,
+    sequences: &BySide<Sequence>,
+    differences: Vec<StyleDifference>,
+) -> Change {
+    let sides = BySide::from_fn(|side| {
+        let positions = positions[side].clone();
+        ChangeSide::Text {
+            text: text_of(&sequences[side].tokens[positions.clone()]),
+            areas: areas_of(sequences[side].indexed_tokens(positions)),
+        }
+    });
+    Change {
+        sides,
+        difference: Difference::Style(differences),
     }
 }
 

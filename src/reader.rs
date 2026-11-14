@@ -7,6 +7,8 @@
 
 pub mod pdfium;
 
+use std::fmt;
+
 use crate::geometry::{Rect, Size};
 
 /// One opened PDF document.
@@ -86,6 +88,23 @@ pub struct Color {
     pub alpha: u8,
 }
 
+/// As `#rrggbb`, with the opacity as two more digits unless it is full.
+impl fmt::Display for Color {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            red,
+            green,
+            blue,
+            alpha,
+        } = self;
+        write!(formatter, "#{red:02x}{green:02x}{blue:02x}")?;
+        match *alpha {
+            u8::MAX => Ok(()),
+            alpha => write!(formatter, "{alpha:02x}"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Char {
     /// The character, which is not white space.
@@ -103,4 +122,22 @@ pub struct Char {
     /// The engine may not know which character the hyphen is, in which case
     /// `text` is `'-'`; [`Span::actual_text`] can tell.
     pub is_line_end_hyphen: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn color_reads_as_hexadecimal_with_its_opacity_unless_that_is_full() {
+        let mut color = Color {
+            red: 255,
+            green: 65,
+            blue: 0,
+            alpha: 255,
+        };
+        assert_eq!(color.to_string(), "#ff4100");
+        color.alpha = 128;
+        assert_eq!(color.to_string(), "#ff410080");
+    }
 }

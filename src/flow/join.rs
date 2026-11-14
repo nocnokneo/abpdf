@@ -92,11 +92,14 @@ pub(super) fn join(screened: Screened, vocabulary: &Vocabulary) -> Flow {
                     extend_to_hyphen(word, &hyphen);
                     word.text.push_str(&raw.text);
                     word.fragments.push(raw.fragment);
+                    word.styles.extend(raw.styles);
+                    word.styles.dedup();
                     open_hyphen = raw.line_end_hyphen;
                     continue;
                 }
                 Meaning::Punctuation => {
-                    tokens.push(hyphen_token(&hyphen));
+                    let hyphen = hyphen_token(&hyphen, word);
+                    tokens.push(hyphen);
                     gap = Gap::None;
                 }
                 Meaning::Nothing => extend_to_hyphen(word, &hyphen),
@@ -112,7 +115,10 @@ pub(super) fn join(screened: Screened, vocabulary: &Vocabulary) -> Flow {
     if let Some(hyphen) = open_hyphen {
         let word = tokens.last_mut().expect("a hyphen follows a token");
         match meaning(&hyphen, &word.text, None, vocabulary) {
-            Meaning::Punctuation => tokens.push(hyphen_token(&hyphen)),
+            Meaning::Punctuation => {
+                let hyphen = hyphen_token(&hyphen, word);
+                tokens.push(hyphen);
+            }
             _ => extend_to_hyphen(word, &hyphen),
         }
     }
@@ -120,6 +126,7 @@ pub(super) fn join(screened: Screened, vocabulary: &Vocabulary) -> Flow {
         tokens,
         excluded,
         page_sizes: flow.page_sizes,
+        styles: flow.styles,
     }
 }
 
@@ -163,12 +170,14 @@ fn extend_to_hyphen(word: &mut Token, hyphen: &LineEndHyphen) {
     last.bounds = last.bounds.union(&hyphen.fragment.bounds);
 }
 
-/// The hyphen as a token that follows its word directly.
-fn hyphen_token(hyphen: &LineEndHyphen) -> Token {
+/// The hyphen as a token that follows its word directly, in the style that
+/// the word ends in.
+fn hyphen_token(hyphen: &LineEndHyphen, word: &Token) -> Token {
     Token {
         text: "-".to_owned(),
         fragments: vec![hyphen.fragment],
         gap: Gap::None,
+        styles: word.styles.last().copied().into_iter().collect(),
     }
 }
 
@@ -190,5 +199,6 @@ fn token_of(raw: RawToken) -> Token {
         text: raw.text,
         fragments: vec![raw.fragment],
         gap: raw.gap,
+        styles: raw.styles,
     }
 }

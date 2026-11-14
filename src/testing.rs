@@ -3,7 +3,7 @@
 use std::ops::Range;
 
 use crate::BySide;
-use crate::change::Comparison;
+use crate::change::{Comparison, StyleDifference};
 use crate::filter::Filters;
 use crate::flow::{Flow, FlowBuilder, RawFlow};
 use crate::geometry::{Rect, Size};
@@ -18,6 +18,9 @@ pub(crate) const PARAGRAPH: &str = "this paragraph stands somewhere else now";
 /// Ten tokens, so more than the paragraph, which a diff therefore takes for
 /// the text that stays in place where the two change places.
 pub(crate) const REST: &str = "all the other text of the document stays in place";
+
+pub(crate) const BODY_WEIGHT: u16 = 400;
+pub(crate) const BOLD_WEIGHT: u16 = 700;
 
 /// Builds a page on which every character takes one cell of a grid.
 pub(crate) struct PageBuilder {
@@ -82,6 +85,16 @@ impl PageBuilder {
         self.span(|span| span.is_artifact = true)
     }
 
+    /// Starts a span in a style that differs from that of body text as
+    /// `change` says.
+    pub(crate) fn styled(self, change: impl FnOnce(&mut Style)) -> Self {
+        self.span(|span| change(&mut span.style))
+    }
+
+    pub(crate) fn bold(self) -> Self {
+        self.styled(|style| style.font_weight = Some(BOLD_WEIGHT))
+    }
+
     pub(crate) fn actual_text(self, actual_text: &str) -> Self {
         self.span(|span| span.actual_text = Some(actual_text.to_owned()))
     }
@@ -126,7 +139,7 @@ fn body_span() -> Span {
         style: Style {
             font_name: "Body".to_owned(),
             font_size: 10.0,
-            font_weight: Some(400),
+            font_weight: Some(BODY_WEIGHT),
             is_italic: false,
             fill_color: Color {
                 red: 0,
@@ -163,18 +176,44 @@ pub(crate) fn comparison_of_pages(
     old_pages: &[impl AsRef<str>],
     new_pages: &[impl AsRef<str>],
 ) -> Comparison {
-    fn flow(pages: &[impl AsRef<str>]) -> RawFlow {
-        raw_flow_of(
-            pages
-                .iter()
-                .map(|text| PageBuilder::new().text(text.as_ref())),
-        )
+    fn built(pages: &[impl AsRef<str>]) -> impl Iterator<Item = PageBuilder> {
+        let texts = pages.iter();
+        texts.map(|text| PageBuilder::new().text(text.as_ref()))
     }
+    comparison_of_built_pages(built(old_pages), built(new_pages))
+}
+
+/// The comparison of two documents with these pages, with nothing left out.
+pub(crate) fn comparison_of_built_pages(
+    old_pages: impl IntoIterator<Item = PageBuilder>,
+    new_pages: impl IntoIterator<Item = PageBuilder>,
+) -> Comparison {
     let flows = BySide {
-        old: flow(old_pages),
-        new: flow(new_pages),
+        old: raw_flow_of(old_pages),
+        new: raw_flow_of(new_pages),
     };
     Comparison::of(flows, &Filters::default())
+}
+
+/// A page with this text, in which what stands between two `*` is bold.
+pub(crate) fn page_with_bold(text: &str) -> PageBuilder {
+    let mut page = PageBuilder::new();
+    for (index, part) in text.split('*').enumerate() {
+        page = match index % 2 {
+            0 => page.body(),
+            _ => page.bold(),
+        };
+        page = page.text(part);
+    }
+    page
+}
+
+/// What differs in the style of text that [`page_with_bold`] makes bold.
+pub(crate) fn bold_difference() -> StyleDifference {
+    StyleDifference::Weight(BySide {
+        old: Some(BODY_WEIGHT),
+        new: Some(BOLD_WEIGHT),
+    })
 }
 
 /// The bounds of the cells from `columns` on `line` of a page.
