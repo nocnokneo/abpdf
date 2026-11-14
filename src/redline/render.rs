@@ -15,9 +15,10 @@ use krilla::surface::Surface;
 use krilla::{Document, SerializeSettings};
 
 use super::Target;
+use super::connector;
 use super::summary::{self, SummaryPages};
 use super::text::TextFont;
-use super::{Connector, Mark, MarkStyle, Redline, Rgb, Sheet, SheetLayout, SheetPage, Source};
+use super::{Mark, MarkStyle, Redline, Rgb, Sheet, SheetLayout, SheetPage, Source};
 use crate::geometry::Rect;
 use crate::{BySide, Side};
 
@@ -33,16 +34,6 @@ const CARET_LINE_WIDTH: f32 = 1.2;
 /// How much of a mark's color a highlight keeps: the rest is white, so that
 /// the text under it stays readable.
 const HIGHLIGHT_STRENGTH: f32 = 0.3;
-
-const CONNECTOR_COLOR: Rgb = Rgb::new(140, 89, 204);
-const CONNECTOR_OPACITY: f32 = 0.22;
-const CONNECTOR_LINE_WIDTH: f32 = 0.6;
-/// The space between a connector and the frames it joins.
-const CONNECTOR_INSET: f32 = 3.0;
-const CONNECTOR_LABEL_FONT_SIZE: f32 = 7.0;
-/// How far the band of a connector reaches into the gutter from a side whose
-/// other side the sheet does not show.
-const CONNECTOR_STUB_LENGTH: f32 = 12.0;
 
 /// How far above its target a link shows the sheet from.
 const TARGET_HEADROOM: f32 = 40.0;
@@ -148,9 +139,7 @@ fn draw_sheet(
         }
         stroke_rects(&mut surface, [frame], FRAME_COLOR, FRAME_LINE_WIDTH);
     }
-    for connector in &sheet.connectors {
-        draw_connector(&mut surface, font, layout, connector);
-    }
+    connector::draw_all(&mut surface, font, layout, &sheet.connectors);
     let left = layout.frames.old.left;
     let notes = [
         (&sheet.note_above, layout.note_above_baseline()),
@@ -241,102 +230,6 @@ fn stroke_left_edges(surface: &mut Surface, rects: impl IntoIterator<Item = Rect
     surface.draw_path(&path);
 }
 
-/// One end of the band of a connector: a vertical extent at a position
-/// across the sheet.
-#[derive(Clone, Copy)]
-struct ConnectorEnd {
-    x: f32,
-    top: f32,
-    bottom: f32,
-}
-
-impl ConnectorEnd {
-    /// An end of no height, level with the middle of `other`.
-    fn point_level_with(other: ConnectorEnd, x: f32) -> Self {
-        let center = (other.top + other.bottom) / 2.0;
-        Self {
-            x,
-            top: center,
-            bottom: center,
-        }
-    }
-}
-
-/// Draws a band that runs from the old side's extent at the left of the
-/// gutter to the new side's extent at its right, with the label in between.
-/// Where a side has no extent, the band is a stub that comes to a point,
-/// with the label after it: the labels of stubs from the left and from the
-/// right then keep out of each other's way.
-fn draw_connector(
-    surface: &mut Surface,
-    font: &TextFont,
-    layout: &SheetLayout,
-    connector: &Connector,
-) {
-    let (gutter_left, gutter_right) = layout.gutter();
-    let (left_x, right_x) = (
-        gutter_left + CONNECTOR_INSET,
-        gutter_right - CONNECTOR_INSET,
-    );
-    let middle = (left_x + right_x) / 2.0;
-    let label_width = font.width(&connector.label, CONNECTOR_LABEL_FONT_SIZE);
-
-    let end_at = |side: Side, x: f32| {
-        let span = connector.spans[side]?;
-        let frame_top = layout.frames[side].top;
-        Some(ConnectorEnd {
-            x,
-            top: frame_top + span.top,
-            bottom: frame_top + span.bottom,
-        })
-    };
-    let (left, right, label_left) = match (end_at(Side::Old, left_x), end_at(Side::New, right_x)) {
-        (Some(left), Some(right)) => (left, right, middle - label_width / 2.0),
-        (Some(left), None) => {
-            let point = ConnectorEnd::point_level_with(left, left_x + CONNECTOR_STUB_LENGTH);
-            (left, point, point.x + CONNECTOR_INSET)
-        }
-        (None, Some(right)) => {
-            let point = ConnectorEnd::point_level_with(right, right_x - CONNECTOR_STUB_LENGTH);
-            (point, right, point.x - CONNECTOR_INSET - label_width)
-        }
-        (None, None) => return,
-    };
-
-    let bend_x = (left.x + right.x) / 2.0;
-    let mut builder = PathBuilder::new();
-    builder.move_to(left.x, left.top);
-    builder.cubic_to(bend_x, left.top, bend_x, right.top, right.x, right.top);
-    builder.line_to(right.x, right.bottom);
-    builder.cubic_to(
-        bend_x,
-        right.bottom,
-        bend_x,
-        left.bottom,
-        left.x,
-        left.bottom,
-    );
-    builder.close();
-    if let Some(path) = builder.finish() {
-        surface.set_fill(Some(Fill {
-            opacity: NormalizedF32::new(CONNECTOR_OPACITY).expect("an opacity between 0 and 1"),
-            ..fill(CONNECTOR_COLOR)
-        }));
-        surface.set_stroke(Some(stroke(CONNECTOR_COLOR, CONNECTOR_LINE_WIDTH)));
-        surface.draw_path(&path);
-    }
-
-    let center = (left.top + left.bottom + right.top + right.bottom) / 4.0;
-    let position = (label_left, center + CONNECTOR_LABEL_FONT_SIZE / 3.0);
-    font.draw(
-        surface,
-        position,
-        CONNECTOR_LABEL_FONT_SIZE,
-        LABEL_COLOR,
-        &connector.label,
-    );
-}
-
 fn path_of_rects(rects: impl IntoIterator<Item = Rect>) -> Option<krilla::geom::Path> {
     let mut builder = PathBuilder::new();
     for rect in rects {
@@ -356,7 +249,7 @@ pub(super) fn fill(color: Rgb) -> Fill {
     }
 }
 
-fn stroke(color: Rgb, line_width: f32) -> Stroke {
+pub(super) fn stroke(color: Rgb, line_width: f32) -> Stroke {
     Stroke {
         paint: krilla_color(color).into(),
         width: line_width,

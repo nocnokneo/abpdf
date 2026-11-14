@@ -7,6 +7,7 @@
 //! The source pages are embedded as they are, so their text stays text and
 //! their drawings stay vector drawings.
 
+mod connector;
 mod layout;
 mod pairing;
 mod plan;
