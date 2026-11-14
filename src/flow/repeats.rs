@@ -95,15 +95,10 @@ impl<'a> Compared<'a> {
     /// The keys of the tokens except those in `ranges` of positions, which
     /// ascend.
     fn keys_without(&self, ranges: &[Range<usize>]) -> Vec<Cow<'a, str>> {
-        let mut ranges = ranges.iter().peekable();
-        let mut keys = Vec::with_capacity(self.tokens.len());
-        for (position, token) in self.tokens.iter().enumerate() {
-            while ranges.next_if(|range| range.end <= position).is_some() {}
-            if !ranges.peek().is_some_and(|range| range.contains(&position)) {
-                keys.push(key_of(&token.text));
-            }
-        }
-        keys
+        let positions = diff::indices_outside(self.tokens.len(), ranges);
+        positions
+            .map(|position| key_of(&self.tokens[position].text))
+            .collect()
     }
 
     /// The ranges of tokens at the tops of pages that repeat lines of the

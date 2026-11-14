@@ -10,7 +10,7 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 
-use crate::diff::{Hunk, Sizes};
+use crate::diff::{self, Hunk, Sizes};
 use crate::{BySide, Side};
 
 /// Text of fewer characters than this is not taken to have moved: a few
@@ -38,7 +38,7 @@ type Block = BySide<Range<usize>>;
 pub(super) fn find(keys: &BySide<Vec<&str>>, hunks: &[Hunk]) -> Vec<Move> {
     let mut finder = Finder {
         keys,
-        sizes: keys.as_ref().map(|keys| Sizes::measure(keys)),
+        sizes: Sizes::measure(keys),
         is_free: BySide::from_fn(|side| {
             let mut is_free = vec![false; keys[side].len()];
             for hunk in hunks {
@@ -50,7 +50,7 @@ pub(super) fn find(keys: &BySide<Vec<&str>>, hunks: &[Hunk]) -> Vec<Move> {
     let mut blocks = finder.equal_blocks();
     // The larger a block, the surer it is what it seems to be, so the
     // largest ones take their tokens and their places first.
-    blocks.sort_by_key(|block| (Reverse(finder.size_of(block)), block.old.start));
+    blocks.sort_by_key(|block| (Reverse(finder.sizes.of(block)), block.old.start));
 
     let mut in_place = InPlace::matched_by(hunks, keys);
     let mut moved = Vec::new();
@@ -66,13 +66,13 @@ pub(super) fn find(keys: &BySide<Vec<&str>>, hunks: &[Hunk]) -> Vec<Move> {
         }
     }
     let mut moves = finder.chain(moved);
-    moves.retain(|moved| finder.size_of(&moved.tokens) >= MIN_MOVED_CHARS);
+    moves.retain(|moved| finder.sizes.of(&moved.tokens) >= MIN_MOVED_CHARS);
     moves
 }
 
 struct Finder<'a> {
     keys: &'a BySide<Vec<&'a str>>,
-    sizes: BySide<Sizes>,
+    sizes: Sizes,
     /// Whether each token is unmatched and no block has taken it.
     is_free: BySide<Vec<bool>>,
 }
@@ -169,13 +169,6 @@ impl Finder<'_> {
         }
     }
 
-    /// The size of text that has these tokens in the two documents, which
-    /// is that of its larger side.
-    fn size_of(&self, tokens: &BySide<Range<usize>>) -> usize {
-        let sizes = BySide::from_fn(|side| self.sizes[side].of(&tokens[side]));
-        sizes.old.max(sizes.new)
-    }
-
     /// Makes one move of blocks that follow each other in both documents
     /// with little between them, which is then a difference inside the move.
     ///
@@ -220,8 +213,7 @@ impl Finder<'_> {
             return None;
         }
         let between = BySide::from_fn(|side| first[side].end..second[side].start);
-        let size = self.size_of(&between);
-        if size > self.size_of(first) || size > self.size_of(second) {
+        if !self.sizes.is_small_between(&between, first, second) {
             return None;
         }
         let is_free = Side::BOTH.into_iter().all(|side| {
@@ -241,21 +233,9 @@ struct InPlace(BTreeMap<usize, usize>);
 impl InPlace {
     /// The runs between the hunks of a diff.
     fn matched_by(hunks: &[Hunk], keys: &BySide<Vec<&str>>) -> Self {
-        let mut starts = BTreeMap::new();
-        let mut run_start = BySide { old: 0, new: 0 };
-        for hunk in hunks {
-            if hunk.old.start > run_start.old {
-                starts.insert(run_start.old, run_start.new);
-            }
-            run_start = BySide {
-                old: hunk.old.end,
-                new: hunk.new.end,
-            };
-        }
-        if keys.old.len() > run_start.old {
-            starts.insert(run_start.old, run_start.new);
-        }
-        Self(starts)
+        let matches = diff::matches(hunks, keys.as_ref().map(Vec::len));
+        let starts = matches.iter().map(|run| (run.old.start, run.new.start));
+        Self(starts.collect())
     }
 
     /// Whether a block of tokens that are in none of the runs comes between
@@ -275,7 +255,6 @@ impl InPlace {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diff;
 
     /// The moves between two texts, whose tokens are separated by spaces.
     fn moves(old: &str, new: &str) -> Vec<Move> {

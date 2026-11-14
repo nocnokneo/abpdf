@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::ops::Range;
 
+use crate::diff;
 use crate::flow::{Flow, Token};
 
 /// Tokens of a flow in the order in which they are compared.
@@ -24,14 +25,7 @@ impl<'a> Sequence<'a> {
     /// The tokens of a flow except those in `ranges` of its indices, which
     /// ascend.
     pub fn without(flow: &'a Flow, ranges: &[Range<usize>]) -> Self {
-        let mut ranges = ranges.iter().peekable();
-        let mut indices = Vec::with_capacity(flow.tokens.len());
-        for index in 0..flow.tokens.len() {
-            while ranges.next_if(|range| range.end <= index).is_some() {}
-            if !ranges.peek().is_some_and(|range| range.contains(&index)) {
-                indices.push(index);
-            }
-        }
+        let indices: Vec<usize> = diff::indices_outside(flow.tokens.len(), ranges).collect();
         let tokens: Vec<&Token> = indices.iter().map(|&index| &flow.tokens[index]).collect();
         Self {
             flow,

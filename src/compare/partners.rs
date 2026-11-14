@@ -1,11 +1,10 @@
 //! Which pages of the two documents belong together.
 
 use std::collections::BTreeMap;
-use std::iter;
 
 use super::sequence::Sequence;
 use crate::BySide;
-use crate::diff::Hunk;
+use crate::diff::{self, Hunk};
 use crate::flow::Token;
 
 /// For each page of each document, the page of the other document that it
@@ -41,26 +40,16 @@ fn shared_token_counts(
     sequences: &BySide<Sequence>,
     hunks: &[Hunk],
 ) -> BTreeMap<(usize, usize), usize> {
-    let ends = sequences.as_ref().map(|sequence| sequence.tokens.len());
-    let end = BySide {
-        old: ends.old..ends.old,
-        new: ends.new..ends.new,
-    };
+    let lengths = sequences.as_ref().map(|sequence| sequence.tokens.len());
     let mut counts = BTreeMap::new();
-    // The tokens between two hunks match one to one.
-    let mut matched = BySide { old: 0, new: 0 };
-    for hunk in hunks.iter().chain(iter::once(&end)) {
-        let old_tokens = &sequences.old.tokens[matched.old..hunk.old.start];
-        let new_tokens = &sequences.new.tokens[matched.new..hunk.new.start];
+    for matched in diff::matches(hunks, lengths) {
+        let old_tokens = &sequences.old.tokens[matched.old];
+        let new_tokens = &sequences.new.tokens[matched.new];
         for (old_token, new_token) in old_tokens.iter().zip(new_tokens) {
             *counts
                 .entry((first_page(old_token), first_page(new_token)))
                 .or_default() += 1;
         }
-        matched = BySide {
-            old: hunk.old.end,
-            new: hunk.new.end,
-        };
     }
     counts
 }
