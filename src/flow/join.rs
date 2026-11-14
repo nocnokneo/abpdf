@@ -3,8 +3,9 @@
 
 use std::collections::HashSet;
 
-use super::{ExcludedToken, Exclusion, Flow, Gap, HyphenKind, LineEndHyphen, RawFlow, RawToken};
+use super::{ExcludedToken, Exclusion, Flow, Gap, HyphenKind, LineEndHyphen, RawToken, Screened};
 use super::{Token, is_word};
+use crate::{BySide, Side};
 
 /// The words of the compared documents, which tell what a hyphen of unknown
 /// kind is.
@@ -19,18 +20,13 @@ pub(super) struct Vocabulary {
 }
 
 impl Vocabulary {
-    /// Collects the words of the tokens that take part in the comparison:
-    /// those of each flow that have no exclusion.
-    pub(super) fn of<'a>(
-        flows: impl IntoIterator<Item = (&'a RawFlow, &'a Vec<Option<Exclusion>>)>,
-    ) -> Self {
+    /// Collects the words of the tokens of both documents that take part in
+    /// the comparison.
+    pub(super) fn of(documents: &BySide<Screened>) -> Self {
         let mut vocabulary = Self::default();
-        for (flow, exclusions) in flows {
-            let tokens = flow.tokens.iter().zip(exclusions);
-            let compared: Vec<&RawToken> = tokens
-                .filter(|(_, exclusion)| exclusion.is_none())
-                .map(|(token, _)| token)
-                .collect();
+        for side in Side::BOTH {
+            let compared: Vec<&RawToken> =
+                documents[side].compared().map(|(_, token)| token).collect();
             for token in &compared {
                 if is_word(&token.text) {
                     vocabulary.words.insert(token.text.clone());
@@ -75,11 +71,8 @@ fn hyphenated(first: &str, second: &str) -> String {
 /// between.
 /// A hard hyphen becomes a token of its own.
 /// `vocabulary` decides about a hyphen of unknown kind.
-pub(super) fn join(
-    flow: RawFlow,
-    exclusions: Vec<Option<Exclusion>>,
-    vocabulary: &Vocabulary,
-) -> Flow {
+pub(super) fn join(screened: Screened, vocabulary: &Vocabulary) -> Flow {
+    let Screened { flow, exclusions } = screened;
     let mut tokens: Vec<Token> = Vec::with_capacity(flow.tokens.len());
     let mut excluded = Vec::new();
     // The hyphen after the last of `tokens`, until the token after it tells
@@ -111,9 +104,8 @@ pub(super) fn join(
         }
         open_hyphen = raw.line_end_hyphen;
         tokens.push(Token {
-            text: raw.text,
-            fragments: vec![raw.fragment],
             gap,
+            ..token_of(raw)
         });
     }
 
@@ -183,13 +175,20 @@ fn hyphen_token(hyphen: &LineEndHyphen) -> Token {
 /// A token that is left out as it is read, with the hyphen that may end its
 /// line as part of where it is drawn.
 fn excluded_token(raw: RawToken, exclusion: Exclusion) -> ExcludedToken {
-    let mut token = Token {
-        text: raw.text,
-        fragments: vec![raw.fragment],
-        gap: raw.gap,
-    };
-    if let Some(hyphen) = raw.line_end_hyphen {
+    let hyphen = raw.line_end_hyphen;
+    let mut token = token_of(raw);
+    if let Some(hyphen) = hyphen {
         extend_to_hyphen(&mut token, &hyphen);
     }
     ExcludedToken { token, exclusion }
+}
+
+/// The token as it is read: on one line, and without the hyphen that may
+/// end the line.
+fn token_of(raw: RawToken) -> Token {
+    Token {
+        text: raw.text,
+        fragments: vec![raw.fragment],
+        gap: raw.gap,
+    }
 }

@@ -10,7 +10,7 @@
 use std::borrow::Cow;
 use std::ops::Range;
 
-use super::{Exclusion, RawFlow, RawToken, key_of};
+use super::{Exclusion, RawToken, Screened, key_of};
 use crate::diff;
 use crate::{BySide, Side};
 
@@ -24,13 +24,19 @@ const LEFT_EDGE_TOLERANCE: f32 = 0.5;
 
 /// Leaves out of the comparison what the pages of each document repeat at
 /// their tops, where the other document has no text for it.
-pub(super) fn exclude(flows: &BySide<RawFlow>, exclusions: &mut BySide<Vec<Option<Exclusion>>>) {
-    let compared = BySide::from_fn(|side| Compared::of(&flows[side], &exclusions[side]));
+pub(super) fn exclude(screened: &mut BySide<Screened>) {
+    let compared = screened.as_ref().map(Compared::of);
     let repeats = compared.as_ref().map(Compared::repeats);
+    let indices_to_exclude = BySide::from_fn(|side| {
+        let positions = repeats_without_counterpart(&compared, &repeats, side);
+        let indices = positions
+            .iter()
+            .map(|&position| compared[side].indices[position]);
+        indices.collect::<Vec<usize>>()
+    });
     for side in Side::BOTH {
-        for position in repeats_without_counterpart(&compared, &repeats, side) {
-            let index = compared[side].indices[position];
-            exclusions[side][index] = Some(Exclusion::Repeat);
+        for &index in &indices_to_exclude[side] {
+            screened[side].exclusions[index] = Some(Exclusion::Repeat);
         }
     }
 }
@@ -84,11 +90,8 @@ struct Line {
 }
 
 impl<'a> Compared<'a> {
-    fn of(flow: &'a RawFlow, exclusions: &[Option<Exclusion>]) -> Self {
-        let tokens = flow.tokens.iter().enumerate();
-        let (indices, tokens) = tokens
-            .filter(|(index, _)| exclusions[*index].is_none())
-            .unzip();
+    fn of(screened: &'a Screened) -> Self {
+        let (indices, tokens) = screened.compared().unzip();
         Self { tokens, indices }
     }
 

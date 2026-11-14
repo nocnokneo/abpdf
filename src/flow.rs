@@ -31,12 +31,28 @@ use self::join::Vocabulary;
 /// last: a word joins the next token that takes part, and the words of both
 /// documents together tell what a hyphen is where the producer does not.
 pub fn prepare(flows: BySide<RawFlow>, filters: &Filters) -> BySide<Flow> {
-    let mut exclusions = flows.as_ref().map(|flow| filters.exclusions(flow));
-    repeats::exclude(&flows, &mut exclusions);
-    let vocabulary = Vocabulary::of([(&flows.old, &exclusions.old), (&flows.new, &exclusions.new)]);
-    BySide {
-        old: join::join(flows.old, exclusions.old, &vocabulary),
-        new: join::join(flows.new, exclusions.new, &vocabulary),
+    let mut screened = flows.map(|flow| Screened {
+        exclusions: filters.exclusions(&flow),
+        flow,
+    });
+    repeats::exclude(&mut screened);
+    let vocabulary = Vocabulary::of(&screened);
+    screened.map(|screened| join::join(screened, &vocabulary))
+}
+
+/// A flow as it is read, with the rule that leaves each of its tokens out of
+/// the comparison, if one does.
+struct Screened {
+    flow: RawFlow,
+    exclusions: Vec<Option<Exclusion>>,
+}
+
+impl Screened {
+    /// The tokens that take part in the comparison, each with its index in
+    /// the flow.
+    fn compared(&self) -> impl Iterator<Item = (usize, &RawToken)> {
+        let tokens = self.flow.tokens.iter().enumerate();
+        tokens.filter(|(index, _)| self.exclusions[*index].is_none())
     }
 }
 
