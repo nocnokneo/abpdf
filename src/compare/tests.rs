@@ -6,7 +6,7 @@ use crate::BySide;
 use crate::change::{Area, Change, ChangeKind, ChangeSide, Comparison};
 use crate::filter::Filters;
 use crate::flow::{Exclusion, Flow};
-use crate::testing::{PageBuilder, cell_bounds, comparison_of, raw_flow_of};
+use crate::testing::{PARAGRAPH, PageBuilder, REST, cell_bounds, comparison_of, raw_flow_of};
 
 fn compare_with(
     old: impl IntoIterator<Item = PageBuilder>,
@@ -200,8 +200,11 @@ fn change_can_span_pages() {
     ];
     let new = [PageBuilder::new().text("keep here")];
     let changes = compare_with(old, new, &Filters::default());
-    assert_eq!(changes[0].sides.old.page_indices(), [0, 1]);
-    assert_eq!(changes[0].sides.new.page_indices(), [0]);
+    assert_eq!(
+        changes[0].sides.old.areas(),
+        [cells(0, 0, 5..8), cells(1, 0, 0..5)]
+    );
+    assert_eq!(changes[0].sides.new.areas(), [cells(0, 0, 4..4)]);
 }
 
 #[test]
@@ -388,11 +391,6 @@ fn change_to_a_running_header_is_reported_on_the_first_page_only() {
     assert_eq!(summaries(&changes), [(ChangeKind::Replaced, "A", "B")]);
     assert_eq!(changes[0].location(), "old p. 1 / new p. 1");
 }
-
-/// Six tokens, and ten that the diff takes for what stays in place where the
-/// two change places.
-const PARAGRAPH: &str = "this paragraph stands somewhere else now";
-const REST: &str = "all the other text of the document stays in place";
 
 #[test]
 fn text_that_stands_at_another_place_is_a_move() {

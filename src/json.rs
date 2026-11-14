@@ -84,7 +84,7 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
-    use crate::testing::comparison_of;
+    use crate::testing::{PARAGRAPH, REST, comparison_of};
 
     fn report(old: &str, new: &str) -> Value {
         let mut output = Vec::new();
@@ -118,15 +118,13 @@ mod tests {
 
     #[test]
     fn text_that_moved_has_its_areas_in_both_documents() {
-        let paragraph = "this paragraph stands somewhere else now";
-        let rest = "all the other text of the document stays in place";
-        let old = format!("{paragraph}\n{rest}");
-        let new = format!("{rest}\n{paragraph}");
+        let old = format!("{PARAGRAPH}\n{REST}");
+        let new = format!("{REST}\n{PARAGRAPH}");
         let report = report(&old, &new);
         let change = &report["changes"][0];
         assert_eq!(change["kind"], "moved");
-        assert_eq!(change["old"]["text"], paragraph);
-        assert_eq!(change["new"]["text"], paragraph);
+        assert_eq!(change["old"]["text"], PARAGRAPH);
+        assert_eq!(change["new"]["text"], PARAGRAPH);
         assert_eq!(change["old"]["areas"][0]["top"], 0.0);
         assert_eq!(change["new"]["areas"][0]["top"], 20.0);
     }

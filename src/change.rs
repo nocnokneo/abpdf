@@ -108,14 +108,6 @@ impl ChangeSide {
         }
     }
 
-    /// The pages that the side is on, in reading order and without repeats.
-    pub fn page_indices(&self) -> Vec<usize> {
-        let areas = self.areas().iter();
-        let mut page_indices: Vec<usize> = areas.map(|area| area.page_index).collect();
-        page_indices.dedup();
-        page_indices
-    }
-
     /// The page on which the side starts, if it is anywhere in its document.
     pub fn first_page_index(&self) -> Option<usize> {
         Some(self.areas().first()?.page_index)

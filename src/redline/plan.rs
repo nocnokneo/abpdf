@@ -241,8 +241,10 @@ mod tests {
     use super::*;
     use crate::filter::Filters;
     use crate::geometry::Rect;
-    use crate::testing::raw_flow_of;
-    use crate::testing::{CELL_HEIGHT, LINE_PITCH, PageBuilder, cell_bounds, comparison_of_pages};
+    use crate::testing::{
+        CELL_HEIGHT, LINE_PITCH, PARAGRAPH, PageBuilder, REST, cell_bounds, comparison_of_pages,
+        raw_flow_of,
+    };
 
     /// The redline of two documents, given as the text of each of their pages.
     fn redline(old_pages: &[impl AsRef<str>], new_pages: &[impl AsRef<str>]) -> Redline {
@@ -552,15 +554,13 @@ mod tests {
 
     #[test]
     fn text_that_moved_is_marked_as_such_where_it_was_and_where_it_is() {
-        let paragraph = "this paragraph stands somewhere else now";
-        let rest = "all the other text of the document stays in place";
-        let redline = redline(&[paragraph, rest], &[rest, paragraph]);
+        let redline = redline(&[PARAGRAPH, REST], &[REST, PARAGRAPH]);
         // One sheet shows the page that the text was on next to the page
         // that it is on.
         assert_eq!(shown_pages(&redline), [(Some(0), Some(1))]);
         let sheet = &redline.sheets[0];
         let mark = Mark {
-            bounds: cells(0..paragraph.len()),
+            bounds: cells(0..PARAGRAPH.len()),
             color: Rgb::MOVED,
             style: MarkStyle::Highlight,
         };
@@ -577,7 +577,7 @@ mod tests {
             [SummaryLine {
                 sign: '⇄',
                 color: Rgb::MOVED,
-                text: paragraph.to_owned(),
+                text: PARAGRAPH.to_owned(),
             }]
         );
     }

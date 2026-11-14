@@ -34,7 +34,7 @@ pub fn write(comparison: &Comparison, mut output: impl Write) -> io::Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::comparison_of;
+    use crate::testing::{PARAGRAPH, REST, comparison_of};
 
     fn listing(old: &str, new: &str) -> String {
         let mut output = Vec::new();
@@ -57,14 +57,12 @@ mod tests {
 
     #[test]
     fn text_that_moved_is_listed_once() {
-        let paragraph = "this paragraph stands somewhere else now";
-        let rest = "all the other text of the document stays in place";
         assert_eq!(
             listing(
-                &format!("{paragraph}\n{rest}"),
-                &format!("{rest}\n{paragraph}")
+                &format!("{PARAGRAPH}\n{REST}"),
+                &format!("{REST}\n{PARAGRAPH}")
             ),
-            format!("@ old p. 1 / new p. 1\n> {paragraph}\n1 change\n")
+            format!("@ old p. 1 / new p. 1\n> {PARAGRAPH}\n1 change\n")
         );
     }
 

@@ -175,7 +175,7 @@ impl Finder<'_> {
     /// Little is what is no larger than either of the two: the rule by which
     /// a diff takes a small match between two hunks for a coincidence, the
     /// other way around.
-    fn chain(&mut self, mut blocks: Vec<Block>) -> Vec<Move> {
+    fn chain(&self, mut blocks: Vec<Block>) -> Vec<Move> {
         blocks.sort_by_key(|block| block.old.start);
         let mut moves: Vec<Move> = Vec::new();
         for block in blocks {
@@ -184,7 +184,6 @@ impl Finder<'_> {
                 .and_then(|last| self.small_gap(&last.tokens, &block));
             match (moves.last_mut(), between) {
                 (Some(last), Some(between)) => {
-                    self.take(&between);
                     last.tokens = BySide::from_fn(|side| last.tokens[side].start..block[side].end);
                     if !(between.old.is_empty() && between.new.is_empty()) {
                         last.inner_hunks.push(between);
@@ -255,6 +254,7 @@ impl InPlace {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{PARAGRAPH, REST};
 
     /// The moves between two texts, whose tokens are separated by spaces.
     fn moves(old: &str, new: &str) -> Vec<Move> {
@@ -269,12 +269,6 @@ mod tests {
             inner_hunks: Vec::new(),
         }
     }
-
-    /// Six tokens.
-    const PARAGRAPH: &str = "this paragraph stands somewhere else now";
-    /// Ten tokens, so more than the paragraph, which the diff therefore
-    /// takes for the text that moved around this.
-    const REST: &str = "all the other text of the document stays in place";
 
     #[test]
     fn text_that_is_edited_in_place_did_not_move() {

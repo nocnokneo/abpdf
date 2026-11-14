@@ -13,6 +13,12 @@ pub(crate) const CELL_WIDTH: f32 = 10.0;
 pub(crate) const CELL_HEIGHT: f32 = 12.0;
 pub(crate) const LINE_PITCH: f32 = 20.0;
 
+/// A paragraph of six tokens, for tests in which text moves.
+pub(crate) const PARAGRAPH: &str = "this paragraph stands somewhere else now";
+/// Ten tokens, so more than the paragraph, which a diff therefore takes for
+/// the text that stays in place where the two change places.
+pub(crate) const REST: &str = "all the other text of the document stays in place";
+
 /// Builds a page on which every character takes one cell of a grid.
 pub(crate) struct PageBuilder {
     page: Page,
