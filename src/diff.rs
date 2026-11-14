@@ -61,13 +61,13 @@ fn merge_across_small_matches(hunks: Vec<Hunk>, sizes: &BySide<Sizes>) -> Vec<Hu
 }
 
 /// The sizes of runs of keys, in characters.
-struct Sizes {
+pub(crate) struct Sizes {
     /// The size of all keys before each index.
     before: Vec<usize>,
 }
 
 impl Sizes {
-    fn measure(keys: &[&str]) -> Self {
+    pub(crate) fn measure(keys: &[&str]) -> Self {
         let mut before = Vec::with_capacity(keys.len() + 1);
         let mut total = 0;
         before.push(total);
@@ -78,7 +78,7 @@ impl Sizes {
         Self { before }
     }
 
-    fn of(&self, range: &Range<usize>) -> usize {
+    pub(crate) fn of(&self, range: &Range<usize>) -> usize {
         self.before[range.end] - self.before[range.start]
     }
 }

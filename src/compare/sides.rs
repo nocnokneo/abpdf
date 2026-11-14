@@ -1,5 +1,6 @@
 //! What each document has at a place where they differ.
 
+use super::moves::Move;
 use super::sequence::Sequence;
 use crate::BySide;
 use crate::change::{Area, Change, ChangeSide};
@@ -27,10 +28,40 @@ pub(super) fn change_at(
         }
         tokens => ChangeSide::Text {
             text: text_of(tokens),
-            areas: areas_of(tokens),
+            areas: areas_of(sequences[side].indexed_tokens(hunk[side].clone())),
         },
     });
-    Change { sides }
+    Change {
+        sides,
+        is_move: false,
+    }
+}
+
+/// The change that moved text is: the text at its place in each document.
+///
+/// `sequences` are the whole documents, in which a position is an index of
+/// the flow.
+pub(super) fn moved(moved: &Move, sequences: &BySide<Sequence>) -> Change {
+    let sides = BySide::from_fn(|side| {
+        let positions = moved.tokens[side].clone();
+        // What differs inside the moved text is a change of its own, and is
+        // marked as one.
+        let differs = |index: usize| {
+            moved
+                .inner_hunks
+                .iter()
+                .any(|hunk| hunk[side].contains(&index))
+        };
+        let tokens = sequences[side].indexed_tokens(positions.clone());
+        ChangeSide::Text {
+            text: text_of(&sequences[side].tokens[positions]),
+            areas: areas_of(tokens.filter(|(index, _)| !differs(*index))),
+        }
+    });
+    Change {
+        sides,
+        is_move: true,
+    }
 }
 
 fn text_of(tokens: &[&Token]) -> String {
@@ -44,22 +75,31 @@ fn text_of(tokens: &[&Token]) -> String {
     text
 }
 
-/// The bounds of the tokens, merged per line.
-fn areas_of(tokens: &[&Token]) -> Vec<Area> {
+/// The bounds of tokens, each given with its index in the flow, merged per
+/// line.
+/// Tokens that other tokens of the flow stand between are not merged, so
+/// that an area does not cover those.
+fn areas_of<'a>(tokens: impl IntoIterator<Item = (usize, &'a Token)>) -> Vec<Area> {
     let mut areas: Vec<Area> = Vec::new();
-    let mut last_line = None;
-    for fragment in tokens.iter().flat_map(|token| &token.fragments) {
-        let line = (fragment.page_index, fragment.line_index);
-        match areas.last_mut() {
-            Some(area) if last_line == Some(line) => {
-                area.bounds = area.bounds.union(&fragment.bounds);
+    // The index and the line of the fragment before.
+    let mut last = None;
+    for (index, token) in tokens {
+        for fragment in &token.fragments {
+            let line = (fragment.page_index, fragment.line_index);
+            let continues_last = last.is_some_and(|(last_index, last_line)| {
+                last_line == line && index <= last_index + 1
+            });
+            match areas.last_mut() {
+                Some(area) if continues_last => {
+                    area.bounds = area.bounds.union(&fragment.bounds);
+                }
+                _ => areas.push(Area {
+                    page_index: fragment.page_index,
+                    bounds: fragment.bounds,
+                }),
             }
-            _ => areas.push(Area {
-                page_index: fragment.page_index,
-                bounds: fragment.bounds,
-            }),
+            last = Some((index, line));
         }
-        last_line = Some(line);
     }
     areas
 }

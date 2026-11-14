@@ -8,7 +8,7 @@ use std::process::{Command, Output};
 
 use serde_json::Value;
 
-use common::corpus_path as corpus;
+use common::{REVISIONS_CHANGE_COUNT, corpus_path as corpus};
 
 /// A path for a file that a test writes.
 fn scratch(file_name: &str) -> PathBuf {
@@ -59,7 +59,8 @@ fn different_documents_exit_with_1_and_list_their_changes() {
     let change =
         "@ old p. 1 / new p. 1\n- shall be calibrated annually\n+ must be verified every month\n";
     assert!(listing.contains(change), "{listing}");
-    assert!(listing.ends_with("\n11 changes\n"), "{listing}");
+    let count = format!("\n{REVISIONS_CHANGE_COUNT} changes\n");
+    assert!(listing.ends_with(&count), "{listing}");
     assert_eq!(stderr(&output), "");
 }
 
@@ -72,7 +73,7 @@ fn redline_and_json_are_written_where_asked() {
     assert!(fs::read(&redline).unwrap().starts_with(b"%PDF-"));
     let report: Value = serde_json::from_slice(&fs::read(&json).unwrap()).unwrap();
     let changes = report["changes"].as_array().unwrap();
-    assert_eq!(changes.len(), 11);
+    assert_eq!(changes.len(), REVISIONS_CHANGE_COUNT);
     assert_eq!(changes[2]["kind"], "replaced");
     assert_eq!(changes[2]["new"]["text"], "must be verified every month");
     assert_eq!(changes[2]["new"]["areas"][0]["page"], 1);

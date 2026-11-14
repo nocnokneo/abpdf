@@ -7,7 +7,7 @@ use krilla::page::PageSettings;
 use krilla::surface::Surface;
 
 use super::text::TextFont;
-use super::{Rgb, Summary, SummaryEntry};
+use super::{Rgb, Summary, SummaryEntry, SummaryLine};
 use crate::excerpt::shortened;
 use crate::geometry::Size;
 
@@ -77,16 +77,9 @@ impl SummaryPages {
 }
 
 fn height_of(entry: &SummaryEntry) -> f32 {
-    lines_of(entry).count() as f32 * LINE_HEIGHT
-}
-
-/// The lines of an entry: the sign, the color and the text of each side
-/// that has text.
-fn lines_of(entry: &SummaryEntry) -> impl Iterator<Item = (&'static str, Rgb, &str)> {
-    let texts = entry.texts.as_ref().map(|text| text.as_deref());
-    let lines = [("−", Rgb::REMOVED, texts.old), ("+", Rgb::ADDED, texts.new)];
-    let with_text = |(sign, color, text): (_, _, Option<_>)| Some((sign, color, text?));
-    lines.into_iter().filter_map(with_text)
+    // The number and the location of an entry take a line also if it has no
+    // text.
+    entry.lines.len().max(1) as f32 * LINE_HEIGHT
 }
 
 /// Draws the pages. `destinations` has, for each entry, the view of the
@@ -165,11 +158,12 @@ fn draw_entry(
         TEXT_COLOR,
         &entry.location,
     );
-    for (line, (sign, color, text)) in lines_of(entry).enumerate() {
-        let baseline = baseline + line as f32 * LINE_HEIGHT;
-        let text = font.fitted(text, FONT_SIZE, page_width - MARGIN - TEXT_LEFT);
-        font.draw(surface, (SIGN_LEFT, baseline), FONT_SIZE, color, sign);
-        font.draw(surface, (TEXT_LEFT, baseline), FONT_SIZE, color, &text);
+    for (line_index, line) in entry.lines.iter().enumerate() {
+        let baseline = baseline + line_index as f32 * LINE_HEIGHT;
+        let sign = line.sign.to_string();
+        let text = font.fitted(&line.text, FONT_SIZE, page_width - MARGIN - TEXT_LEFT);
+        font.draw(surface, (SIGN_LEFT, baseline), FONT_SIZE, line.color, &sign);
+        font.draw(surface, (TEXT_LEFT, baseline), FONT_SIZE, line.color, &text);
     }
 }
 
@@ -179,22 +173,21 @@ fn counts_line(change_count: usize, sheet_count: usize) -> String {
         0 => "No differences".to_owned(),
         _ => format!(
             "{change_count} change{} on {sheet_count} sheet{}. \
-             Removed text is red on the left, added text is green on the right.",
+             Removed text is red on the left, added text is green on the right, \
+             and moved text is blue on both sides.",
             plural(change_count),
             plural(sheet_count),
         ),
     }
 }
 
-/// The title of the bookmark of the entry at `index`.
+/// The title of the bookmark of the entry at `index`: its one text with its
+/// sign, or its texts one after the other.
 pub(super) fn bookmark_title(index: usize, entry: &SummaryEntry) -> String {
-    let texts = entry.texts.as_ref();
-    let texts = texts.map(|text| Some(shortened(text.as_ref()?, BOOKMARK_TEXT_CHARS)));
-    let texts = match (texts.old, texts.new) {
-        (Some(old), Some(new)) => format!("{old} → {new}"),
-        (Some(old), None) => format!("− {old}"),
-        (None, Some(new)) => format!("+ {new}"),
-        (None, None) => String::new(),
+    let shortened = |line: &SummaryLine| shortened(&line.text, BOOKMARK_TEXT_CHARS);
+    let texts = match entry.lines.as_slice() {
+        [line] => format!("{} {}", line.sign, shortened(line)),
+        lines => lines.iter().map(shortened).collect::<Vec<_>>().join(" → "),
     };
     format!("{}. {texts}", index + 1)
 }
@@ -202,17 +195,20 @@ pub(super) fn bookmark_title(index: usize, entry: &SummaryEntry) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::BySide;
     use crate::redline::Target;
 
+    /// An entry for a change with these texts.
     fn entry(old_text: Option<&str>, new_text: Option<&str>) -> SummaryEntry {
-        let texts = BySide {
-            old: old_text,
-            new: new_text,
+        let line = |sign, color, text: &str| SummaryLine {
+            sign,
+            color,
+            text: text.to_owned(),
         };
+        let removed = old_text.map(|text| line('−', Rgb::REMOVED, text));
+        let added = new_text.map(|text| line('+', Rgb::ADDED, text));
         SummaryEntry {
             location: "old p. 1 / new p. 1".to_owned(),
-            texts: texts.map(|text| text.map(str::to_owned)),
+            lines: removed.into_iter().chain(added).collect(),
             target: Target {
                 sheet_index: 0,
                 top: 0.0,
@@ -314,6 +310,15 @@ mod tests {
         );
         assert_eq!(bookmark_title(1, &entry(None, Some("new"))), "2. + new");
         assert_eq!(bookmark_title(2, &entry(Some("old"), None)), "3. − old");
+        let moved = SummaryEntry {
+            lines: vec![SummaryLine {
+                sign: '⇄',
+                color: Rgb::MOVED,
+                text: "moved".to_owned(),
+            }],
+            ..entry(None, None)
+        };
+        assert_eq!(bookmark_title(3, &moved), "4. ⇄ moved");
     }
 
     #[test]

@@ -11,18 +11,25 @@ use crate::{BySide, Side};
 pub struct Comparison {
     /// The documents as they were compared.
     pub flows: BySide<Flow>,
-    /// In the order of the text.
+    /// In the order of the new document: a change is where its new text is,
+    /// or where the text would be that only the old document has.
     pub changes: Vec<Change>,
     /// For each page of a document, the page of the other document that it
     /// shares most of its unchanged text with, if it shares any.
     pub page_partners: BySide<Vec<Option<usize>>>,
 }
 
-/// A place where the documents differ.
-/// At least one of them has text there.
+/// A place where the documents differ, or text that stands at another place
+/// in the new document.
+/// At least one of the documents has text there.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Change {
     pub sides: BySide<ChangeSide>,
+    /// Whether the sides are one text at two places, and not two texts at
+    /// one place.
+    /// The text can differ a little between the places, and what differs is
+    /// then a change of its own.
+    pub is_move: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,12 +40,14 @@ pub enum ChangeKind {
     Deleted,
     /// Text of the old document that the new document has other text for.
     Replaced,
+    /// Text that both documents have, at different places.
+    Moved,
 }
 
 /// What one document has at a change.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ChangeSide {
-    /// Text that the other document does not have.
+    /// Text that the other document does not have, or has at another place.
     Text {
         text: String,
         /// Where the text is: one area per line, in reading order.
@@ -65,6 +74,7 @@ impl Change {
         match (self.sides.old.text(), self.sides.new.text()) {
             (None, _) => ChangeKind::Inserted,
             (_, None) => ChangeKind::Deleted,
+            _ if self.is_move => ChangeKind::Moved,
             _ => ChangeKind::Replaced,
         }
     }

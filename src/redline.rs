@@ -42,10 +42,19 @@ pub struct Summary {
 pub struct SummaryEntry {
     /// Where the change is in the documents, for a reader.
     pub location: String,
-    /// The text that each document has at the change, if it has any.
-    pub texts: BySide<Option<String>>,
+    /// The texts of the change.
+    pub lines: Vec<SummaryLine>,
     /// Where the sheets show the change, which the entry links to.
     pub target: Target,
+}
+
+/// One text of a change in the summary.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SummaryLine {
+    /// What happened to the text, such as `+` for text that was added.
+    pub sign: char,
+    pub color: Rgb,
+    pub text: String,
 }
 
 /// A place on a sheet.

@@ -10,12 +10,19 @@ use abpdf::flow::Exclusion;
 use abpdf::profile::Profile;
 use abpdf::{BySide, Side};
 
-use common::{both, compare, compare_and_redline, corpus, corpus_path, page_texts};
+use common::page_texts;
+use common::{REVISIONS_CHANGE_COUNT, both, compare, compare_and_redline, corpus, corpus_path};
 
-use ChangeKind::{Deleted, Inserted, Replaced};
+use ChangeKind::{Deleted, Inserted, Moved, Replaced};
+
+const STORAGE_OLD: &str =
+    "Store the instrument in its case when it is not in use, in a dry room that is free of dust.";
+const STORAGE_NEW: &str =
+    "Store the instrument in its case when it is not in use, in a cool room that is free of dust.";
+const CHECK: &str = "Check the supply voltage at the start of every series of measurements.";
 
 /// What the edits in the source have to be reported as.
-const EDITS: [(ChangeKind, &str, &str); 11] = [
+const EDITS: [(ChangeKind, &str, &str); REVISIONS_CHANGE_COUNT] = [
     (Inserted, "", "Monitoring"),
     (
         Inserted,
@@ -35,6 +42,8 @@ const EDITS: [(ChangeKind, &str, &str); 11] = [
         "Monitoring The monitoring interface is read only.",
     ),
     (Deleted, "Notes are set in italic type.", ""),
+    // Of the two paragraphs that change places, the shorter one moved.
+    (Moved, CHECK, CHECK),
     (
         Inserted,
         "",
@@ -45,6 +54,10 @@ const EDITS: [(ChangeKind, &str, &str); 11] = [
     (Deleted, ",", ""),
     (Replaced, ".", "!"),
     (Replaced, "Notwithstanding", "Despite"),
+    // The paragraph that moved to the last section, and the word that
+    // changed in it.
+    (Moved, STORAGE_OLD, STORAGE_NEW),
+    (Replaced, "dry", "cool"),
 ];
 
 /// The old and the new revision, with or without tags.
@@ -146,7 +159,7 @@ fn redline_lists_the_changes_and_shows_their_pages() {
 
     let summary = &pages[0];
     assert!(
-        summary.starts_with("old.pdf → new.pdf 11 changes on 4 sheets"),
+        summary.starts_with("old.pdf → new.pdf 14 changes on 5 sheets"),
         "{summary}"
     );
     assert!(
@@ -164,15 +177,24 @@ fn redline_lists_the_changes_and_shows_their_pages() {
         "{first_sheet}"
     );
     assert!(
-        first_sheet.contains("new.pdf — page 1 of 3"),
+        first_sheet.contains("new.pdf — page 1 of 4"),
         "{first_sheet}"
     );
     // The source pages are there as text, both of them.
     assert_eq!(first_sheet.matches("Operating manual").count(), 2);
+    // The last sheet shows the paragraph that moved, where it was and where
+    // it is.
     let last_sheet = pages.last().unwrap();
     assert!(
-        last_sheet.contains("Despite the robustness"),
+        last_sheet.contains("old.pdf — page 1 of 3")
+            && last_sheet.contains("new.pdf — page 4 of 4"),
         "{last_sheet}"
+    );
+    assert_eq!(
+        last_sheet
+            .matches("Store the instrument in its case")
+            .count(),
+        2
     );
 }
 

@@ -26,6 +26,11 @@
 
 #let page-of(target) = pdf.artifact[(p. #context counter(page).at(target).first())]
 
+#let storage(room) = [
+  Store the instrument in its case when it is not in use, in a #room room that
+  is free of dust.
+]
+
 #outline()
 
 = Introduction
@@ -51,6 +56,10 @@ It #edit("shall be calibrated annually", "must be verified every month") by
 trained staff.
 See @maintenance #page-of(<maintenance>) for the procedure.
 
+// EDIT: a paragraph moves to the section on maintenance, where one of its
+// words is another.
+#edit(storage[dry], [])
+
 #lorem(70)
 
 // EDIT: a section is inserted, which renumbers the sections after it.
@@ -72,6 +81,15 @@ Dimensions are in millimeters unless stated otherwise.
 = Operation
 
 #lorem(50)
+
+// EDIT: two paragraphs change places.
+#let checks = (
+  [Check the supply voltage at the start of every series of measurements.],
+  [Clean the window of the sensor with a dry cloth, and never with a solvent of any kind.],
+)
+#for check in edit(checks, checks.rev()) {
+  par(check)
+}
 
 // EDIT: a figure is inserted, which renumbers the figure after it.
 #if is-new [
@@ -123,3 +141,5 @@ characteristically uncomplicated recalibration procedure necessitates
 extraordinarily conscientious documentation of every intermediate result.
 
 #lorem(40)
+
+#edit([], storage[cool])

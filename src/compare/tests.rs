@@ -388,3 +388,93 @@ fn change_to_a_running_header_is_reported_on_the_first_page_only() {
     assert_eq!(summaries(&changes), [(ChangeKind::Replaced, "A", "B")]);
     assert_eq!(changes[0].location(), "old p. 1 / new p. 1");
 }
+
+/// Six tokens, and ten that the diff takes for what stays in place where the
+/// two change places.
+const PARAGRAPH: &str = "this paragraph stands somewhere else now";
+const REST: &str = "all the other text of the document stays in place";
+
+#[test]
+fn text_that_stands_at_another_place_is_a_move() {
+    let old = format!("{PARAGRAPH}\n{REST}");
+    let new = format!("{REST}\n{PARAGRAPH}");
+    let changes = compare(&old, &new);
+    assert_eq!(
+        summaries(&changes),
+        [(ChangeKind::Moved, PARAGRAPH, PARAGRAPH)]
+    );
+    let paragraph_columns = 0..PARAGRAPH.chars().count();
+    assert_eq!(
+        changes[0].sides.old.areas(),
+        [cells(0, 0, paragraph_columns.clone())]
+    );
+    assert_eq!(
+        changes[0].sides.new.areas(),
+        [cells(0, 1, paragraph_columns)]
+    );
+}
+
+#[test]
+fn text_around_a_move_is_compared_in_place() {
+    let old = format!("{PARAGRAPH}\n{REST} for good");
+    let new = format!("{REST} for ever\n{PARAGRAPH}");
+    let changes = compare(&old, &new);
+    // The changes are in the order of the new document.
+    assert_eq!(
+        summaries(&changes),
+        [
+            (ChangeKind::Replaced, "good", "ever"),
+            (ChangeKind::Moved, PARAGRAPH, PARAGRAPH)
+        ]
+    );
+}
+
+#[test]
+fn difference_inside_moved_text_is_a_change_of_its_own() {
+    let old = format!("{PARAGRAPH} with one word in its middle\n{REST} and more of it");
+    let new = format!("{REST} and more of it\n{PARAGRAPH} with another word in its middle");
+    let changes = compare(&old, &new);
+    assert_eq!(
+        summaries(&changes),
+        [
+            (
+                ChangeKind::Moved,
+                "this paragraph stands somewhere else now with one word in its middle",
+                "this paragraph stands somewhere else now with another word in its middle",
+            ),
+            (ChangeKind::Replaced, "one", "another"),
+        ]
+    );
+    // The move is not marked where the word is, which has a mark of its own.
+    let word_start = format!("{PARAGRAPH} with ").chars().count();
+    let line_end = old.lines().next().unwrap().chars().count();
+    assert_eq!(
+        changes[0].sides.old.areas(),
+        [
+            cells(0, 0, 0..word_start - 1),
+            cells(0, 0, word_start + "one ".len()..line_end)
+        ]
+    );
+    assert_eq!(
+        changes[1].sides.old.areas(),
+        [cells(0, 0, word_start..word_start + "one".len())]
+    );
+    assert_eq!(
+        changes[1].sides.new.areas()[0].bounds.top,
+        cells(0, 1, 0..1).bounds.top
+    );
+}
+
+#[test]
+fn few_words_that_stand_at_another_place_are_removed_and_added() {
+    let old = format!("to be\n{REST}");
+    let new = format!("{REST}\nto be");
+    let changes = compare(&old, &new);
+    assert_eq!(
+        summaries(&changes),
+        [
+            (ChangeKind::Deleted, "to be", ""),
+            (ChangeKind::Inserted, "", "to be")
+        ]
+    );
+}

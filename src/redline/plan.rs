@@ -2,7 +2,7 @@
 
 use super::pairing::{self, PagePair};
 use super::{Connector, Mark, MarkStyle, Redline, Rgb, Sheet, SheetPage, Span, Summary};
-use super::{SummaryEntry, Target};
+use super::{SummaryEntry, SummaryLine, Target};
 use crate::change::{Area, Change, ChangeSide, Comparison};
 use crate::{BySide, Side};
 
@@ -22,10 +22,7 @@ impl Redline {
             .iter()
             .map(|change| SummaryEntry {
                 location: change.location(),
-                texts: change
-                    .sides
-                    .as_ref()
-                    .map(|side| side.text().map(str::to_owned)),
+                lines: summary_lines_of(change),
                 target: target_of(change, &page_pairs),
             })
             .collect();
@@ -76,7 +73,7 @@ impl Planner<'_> {
         let mut marks = Vec::new();
         for change in &self.comparison.changes {
             let change_side = &change.sides[side];
-            let (color, style) = look_of(change_side, side);
+            let (color, style) = look_of(change, side);
             let on_page = |area: &&Area| area.page_index == page_index;
             let to_mark = |area: &Area| Mark {
                 bounds: area.bounds,
@@ -126,13 +123,35 @@ impl Planner<'_> {
 }
 
 /// How one side of a change is marked: its text is highlighted in the color
-/// of that side, and the place where it has none gets a caret in the color
-/// of the other.
-fn look_of(change_side: &ChangeSide, side: Side) -> (Rgb, MarkStyle) {
-    match change_side {
+/// of that side, or in that of moved text, and the place where it has none
+/// gets a caret in the color of the other side.
+fn look_of(change: &Change, side: Side) -> (Rgb, MarkStyle) {
+    match &change.sides[side] {
+        ChangeSide::Text { .. } if change.is_move => (Rgb::MOVED, MarkStyle::Highlight),
         ChangeSide::Text { .. } => (color_of(side), MarkStyle::Highlight),
         ChangeSide::Absent { .. } => (color_of(side.other()), MarkStyle::Caret),
     }
+}
+
+/// What the summary says of a change: the text that was removed and the text
+/// that was added, or the text that moved as the new document has it.
+fn summary_lines_of(change: &Change) -> Vec<SummaryLine> {
+    let texts = change.sides.as_ref().map(ChangeSide::text);
+    let line = |sign, color, text: Option<&str>| {
+        Some(SummaryLine {
+            sign,
+            color,
+            text: text?.to_owned(),
+        })
+    };
+    let lines = match change.is_move {
+        true => [line('⇄', Rgb::MOVED, texts.new), None],
+        false => [
+            line('−', color_of(Side::Old), texts.old),
+            line('+', color_of(Side::New), texts.new),
+        ],
+    };
+    lines.into_iter().flatten().collect()
 }
 
 /// The color of text that only this side has.
@@ -418,10 +437,18 @@ mod tests {
             entries(&redline),
             [SummaryEntry {
                 location: "old p. 2 / new p. 2".to_owned(),
-                texts: BySide {
-                    old: Some("old".to_owned()),
-                    new: Some("new".to_owned()),
-                },
+                lines: vec![
+                    SummaryLine {
+                        sign: '−',
+                        color: Rgb::REMOVED,
+                        text: "old".to_owned(),
+                    },
+                    SummaryLine {
+                        sign: '+',
+                        color: Rgb::ADDED,
+                        text: "new".to_owned(),
+                    },
+                ],
                 target: Target {
                     sheet_index: 0,
                     top: LINE_PITCH,
@@ -452,7 +479,8 @@ mod tests {
             panic!("{:?}", entries(&redline));
         };
         assert_eq!(entry.location, "new p. 1");
-        assert_eq!(entry.texts.old, None);
+        assert_eq!(entry.lines.len(), 1);
+        assert_eq!(entry.lines[0].sign, '+');
         assert_eq!(entry.target.top, LINE_PITCH);
     }
 
@@ -475,6 +503,38 @@ mod tests {
         assert_eq!(shown_pages(&redline), [(Some(0), None)]);
         assert_eq!(redline.sheets[0].note_above, None);
         assert_eq!(redline.sheets[0].note_below, None);
+    }
+
+    #[test]
+    fn text_that_moved_is_marked_as_such_where_it_was_and_where_it_is() {
+        let paragraph = "this paragraph stands somewhere else now";
+        let rest = "all the other text of the document stays in place";
+        let redline = redline(&[paragraph, rest], &[rest, paragraph]);
+        // One sheet shows the page that the text was on next to the page
+        // that it is on.
+        assert_eq!(shown_pages(&redline), [(Some(0), Some(1))]);
+        let sheet = &redline.sheets[0];
+        let mark = Mark {
+            bounds: cells(0..paragraph.len()),
+            color: Rgb::MOVED,
+            style: MarkStyle::Highlight,
+        };
+        assert_eq!(sheet.pages.old.as_ref().unwrap().marks, [mark]);
+        assert_eq!(sheet.pages.new.as_ref().unwrap().marks, [mark]);
+        assert_eq!(sheet.connectors.len(), 1);
+
+        let [entry] = entries(&redline) else {
+            panic!("{:?}", entries(&redline));
+        };
+        assert_eq!(entry.location, "old p. 1 / new p. 2");
+        assert_eq!(
+            entry.lines,
+            [SummaryLine {
+                sign: '⇄',
+                color: Rgb::MOVED,
+                text: paragraph.to_owned(),
+            }]
+        );
     }
 
     #[test]
