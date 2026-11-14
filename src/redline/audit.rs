@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 
-use super::{LegendEntry, Mark, MarkStyle, Rgb};
+use super::{LegendEntry, Mark, MarkStyle, Redline, Rgb};
 use crate::Side;
 use crate::change::Comparison;
 use crate::flow::{Exclusion, Flow};
@@ -26,11 +26,27 @@ const PATTERN_COLORS: [Rgb; 4] = [
 /// that text which is not left out would need between them.
 const MAX_GAP_IN_OUTLINE: f32 = 0.75;
 
+/// Adds to a redline of a comparison what the comparison left out: outlines
+/// on the pages of its sheets, and what their colors stand for.
+pub(super) fn add_to(redline: &mut Redline, comparison: &Comparison) {
+    for sheet in &mut redline.sheets {
+        for side in Side::BOTH {
+            if let Some(page) = &mut sheet.pages[side] {
+                page.marks
+                    .extend(marks_on(&comparison.flows[side], page.page_index));
+            }
+        }
+    }
+    if let Some(summary) = &mut redline.summary {
+        summary.legend = legend_of(comparison);
+    }
+}
+
 /// Outlines around the tokens on a page that were left out, in the color of
 /// the rule that left them out.
 /// Tokens that follow each other closely on a line, left out by one rule,
 /// share an outline.
-pub(super) fn marks_on(flow: &Flow, page_index: usize) -> Vec<Mark> {
+fn marks_on(flow: &Flow, page_index: usize) -> Vec<Mark> {
     let mut marks: Vec<Mark> = Vec::new();
     // The line and the rule of the last mark.
     let mut last = None;
@@ -61,7 +77,7 @@ pub(super) fn marks_on(flow: &Flow, page_index: usize) -> Vec<Mark> {
 
 /// What the colors of the outlines stand for: an entry for each kind of rule
 /// that left text out of the comparison.
-pub(super) fn legend_of(comparison: &Comparison) -> Vec<LegendEntry> {
+fn legend_of(comparison: &Comparison) -> Vec<LegendEntry> {
     let flows = Side::BOTH.into_iter().map(|side| &comparison.flows[side]);
     let exclusions: BTreeSet<Exclusion> = flows
         .flat_map(|flow| &flow.excluded)

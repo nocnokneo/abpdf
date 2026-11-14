@@ -15,12 +15,8 @@ impl Redline {
     ///
     /// The names are what the documents are called on the sheets.
     pub fn of(comparison: &Comparison, names: BySide<&str>) -> Self {
-        let planner = Planner {
-            comparison,
-            names,
-            shows_what_was_left_out: false,
-        };
-        planner.redline()
+        let pages = BySide::from_fn(|side| pairing::pages_with_changes(comparison, side));
+        Planner { comparison, names }.redline(&pages)
     }
 
     /// The redline for checking what a comparison leaves out.
@@ -29,25 +25,24 @@ impl Redline {
     /// two documents on a sheet, and the text that was left out of the
     /// comparison has an outline in a color that tells why.
     pub fn audit_of(comparison: &Comparison, names: BySide<&str>) -> Self {
-        let planner = Planner {
-            comparison,
-            names,
-            shows_what_was_left_out: true,
-        };
-        planner.redline()
+        let every_page =
+            BySide::from_fn(|side| (0..comparison.flows[side].page_sizes.len()).collect());
+        let mut redline = Planner { comparison, names }.redline(&every_page);
+        audit::add_to(&mut redline, comparison);
+        redline
     }
 }
 
 struct Planner<'a> {
     comparison: &'a Comparison,
     names: BySide<&'a str>,
-    shows_what_was_left_out: bool,
 }
 
 impl Planner<'_> {
-    fn redline(&self) -> Redline {
+    /// The redline whose sheets show every change and each of `pages`.
+    fn redline(&self, pages: &BySide<BTreeSet<usize>>) -> Redline {
         let comparison = self.comparison;
-        let page_pairs = pairing::page_pairs(comparison, &self.pages_to_show());
+        let page_pairs = pairing::page_pairs(comparison, pages);
         let mut sheets: Vec<Sheet> = page_pairs.iter().map(|pair| self.sheet(pair)).collect();
         self.note_unchanged_pages(&mut sheets);
 
@@ -60,26 +55,14 @@ impl Planner<'_> {
                 target: target_of(change, &page_pairs),
             })
             .collect();
-        let legend = match self.shows_what_was_left_out {
-            true => audit::legend_of(comparison),
-            false => Vec::new(),
-        };
         Redline {
             summary: Some(Summary {
                 title: format!("{} → {}", self.names.old, self.names.new),
-                legend,
+                legend: Vec::new(),
                 entries,
             }),
             sheets,
         }
-    }
-
-    /// The pages of each document that have to be on a sheet.
-    fn pages_to_show(&self) -> BySide<BTreeSet<usize>> {
-        BySide::from_fn(|side| match self.shows_what_was_left_out {
-            true => (0..self.comparison.flows[side].page_sizes.len()).collect(),
-            false => pairing::pages_with_changes(self.comparison, side),
-        })
     }
 
     fn sheet(&self, pair: &PagePair) -> Sheet {
@@ -121,9 +104,6 @@ impl Planner<'_> {
                 style,
             };
             marks.extend(change_side.areas().iter().filter(on_page).map(to_mark));
-        }
-        if self.shows_what_was_left_out {
-            marks.extend(audit::marks_on(&self.comparison.flows[side], page_index));
         }
         SheetPage {
             page_index,
