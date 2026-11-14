@@ -59,6 +59,29 @@ pub enum ChangeKind {
     Restyled,
 }
 
+/// The part that a text has in a change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextRole {
+    /// Only the old document has the text.
+    Removed,
+    /// Only the new document has the text.
+    Added,
+    /// Both documents have the text, at different places.
+    Moved,
+    /// Both documents have the text at one place, in different styles.
+    Restyled,
+}
+
+impl TextRole {
+    /// The part of text that only one side has.
+    pub fn of_text_only_on(side: Side) -> Self {
+        match side {
+            Side::Old => Self::Removed,
+            Side::New => Self::Added,
+        }
+    }
+}
+
 /// A property of the style of text, with its value in each document.
 #[derive(Clone, Debug, PartialEq)]
 pub enum StyleDifference {
@@ -107,6 +130,40 @@ impl Change {
             (Difference::Text, _, ChangeSide::Absent { .. }) => ChangeKind::Deleted,
             (Difference::Text, ..) => ChangeKind::Replaced,
         }
+    }
+
+    /// The part that the text of a side has in the change, if the side has
+    /// text.
+    pub fn role_of(&self, side: Side) -> Option<TextRole> {
+        self.sides[side].text()?;
+        Some(match &self.difference {
+            Difference::Text => TextRole::of_text_only_on(side),
+            Difference::Place => TextRole::Moved,
+            Difference::Style(_) => TextRole::Restyled,
+        })
+    }
+
+    /// What says the change in words: the text that was removed and the
+    /// text that was added, or the text that both documents have, as the new
+    /// one has it and after what differs in its style if the style does.
+    pub fn lines(&self) -> Vec<(TextRole, String)> {
+        let line = |side: Side| {
+            let text = self.sides[side].text()?;
+            Some((self.role_of(side)?, text.to_owned()))
+        };
+        let lines = match &self.difference {
+            Difference::Text => [line(Side::Old), line(Side::New)],
+            Difference::Place => [line(Side::New), None],
+            Difference::Style(differences) => {
+                let differences = StyleDifference::list(differences);
+                let restyled = line(Side::New);
+                [
+                    restyled.map(|(role, text)| (role, format!("{differences}: {text}"))),
+                    None,
+                ]
+            }
+        };
+        lines.into_iter().flatten().collect()
     }
 
     /// The pages on which the two sides start, in words and as a reader

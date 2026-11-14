@@ -2,7 +2,7 @@
 
 use std::io::{self, Write};
 
-use crate::change::{Comparison, Difference, StyleDifference};
+use crate::change::{Comparison, TextRole};
 use crate::excerpt::shortened;
 
 /// Longer texts are cut off, so that one change stays a few lines.
@@ -20,23 +20,14 @@ const MAX_TEXT_CHARS: usize = 200;
 pub fn write(comparison: &Comparison, mut output: impl Write) -> io::Result<()> {
     for change in &comparison.changes {
         writeln!(output, "@ {}", change.location())?;
-        let texts = change.sides.as_ref().map(|side| {
-            let text = side.text()?;
-            Some(shortened(text, MAX_TEXT_CHARS))
-        });
-        let lines = match &change.difference {
-            Difference::Text => vec![('-', texts.old), ('+', texts.new)],
-            Difference::Place => vec![('>', texts.new)],
-            Difference::Style(differences) => {
-                let differences = StyleDifference::list(differences);
-                let line = texts.new.map(|text| format!("{differences}: {text}"));
-                vec![('~', line)]
-            }
-        };
-        for (sign, text) in lines {
-            if let Some(text) = text {
-                writeln!(output, "{sign} {text}")?;
-            }
+        for (role, text) in change.lines() {
+            let sign = match role {
+                TextRole::Removed => '-',
+                TextRole::Added => '+',
+                TextRole::Moved => '>',
+                TextRole::Restyled => '~',
+            };
+            writeln!(output, "{sign} {}", shortened(&text, MAX_TEXT_CHARS))?;
         }
     }
     match comparison.changes.len() {

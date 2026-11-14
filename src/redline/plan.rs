@@ -6,7 +6,7 @@ use super::audit;
 use super::pairing::{self, PagePair};
 use super::{Connector, Mark, MarkStyle, Redline, Rgb, Sheet, SheetPage, Span, Summary};
 use super::{SummaryEntry, SummaryLine, Target};
-use crate::change::{Area, Change, ChangeSide, Comparison, Difference, StyleDifference};
+use crate::change::{Area, Change, ChangeSide, Comparison, TextRole};
 use crate::{BySide, Side};
 
 impl Redline {
@@ -146,49 +146,44 @@ impl Planner<'_> {
 }
 
 /// How one side of a change is marked: its text is highlighted in the color
-/// of that side, or in that of moved or of restyled text, and the place where
-/// it has none gets a caret in the color of the other side.
+/// of the part it has in the change, and the place where it has none gets a
+/// caret in the color of the text that the other side has there.
 fn look_of(change: &Change, side: Side) -> (Rgb, MarkStyle) {
-    match (&change.sides[side], &change.difference) {
-        (ChangeSide::Absent { .. }, _) => (color_of(side.other()), MarkStyle::Caret),
-        (ChangeSide::Text { .. }, Difference::Text) => (color_of(side), MarkStyle::Highlight),
-        (ChangeSide::Text { .. }, Difference::Place) => (Rgb::MOVED, MarkStyle::Highlight),
-        (ChangeSide::Text { .. }, Difference::Style(_)) => (Rgb::RESTYLED, MarkStyle::Highlight),
+    match change.role_of(side) {
+        Some(role) => (color_of(role), MarkStyle::Highlight),
+        None => {
+            let missing = TextRole::of_text_only_on(side.other());
+            (color_of(missing), MarkStyle::Caret)
+        }
     }
 }
 
-/// What the summary says of a change: the text that was removed and the text
-/// that was added, or the text as the new document has it if it moved or is
-/// in another style, then after what differs in the style.
 fn summary_lines_of(change: &Change) -> Vec<SummaryLine> {
-    let texts = change.sides.as_ref().map(ChangeSide::text);
-    let line = |sign, color, text: Option<&str>| {
-        Some(SummaryLine {
-            sign,
-            color,
-            text: text?.to_owned(),
+    let lines = change.lines().into_iter();
+    lines
+        .map(|(role, text)| SummaryLine {
+            sign: sign_of(role),
+            color: color_of(role),
+            text,
         })
-    };
-    let lines = match &change.difference {
-        Difference::Text => [
-            line('−', color_of(Side::Old), texts.old),
-            line('+', color_of(Side::New), texts.new),
-        ],
-        Difference::Place => [line('⇄', Rgb::MOVED, texts.new), None],
-        Difference::Style(differences) => {
-            let differences = StyleDifference::list(differences);
-            let text = texts.new.map(|text| format!("{differences}: {text}"));
-            [line('≈', Rgb::RESTYLED, text.as_deref()), None]
-        }
-    };
-    lines.into_iter().flatten().collect()
+        .collect()
 }
 
-/// The color of text that only this side has.
-fn color_of(side: Side) -> Rgb {
-    match side {
-        Side::Old => Rgb::REMOVED,
-        Side::New => Rgb::ADDED,
+fn sign_of(role: TextRole) -> char {
+    match role {
+        TextRole::Removed => '−',
+        TextRole::Added => '+',
+        TextRole::Moved => '⇄',
+        TextRole::Restyled => '≈',
+    }
+}
+
+fn color_of(role: TextRole) -> Rgb {
+    match role {
+        TextRole::Removed => Rgb::REMOVED,
+        TextRole::Added => Rgb::ADDED,
+        TextRole::Moved => Rgb::MOVED,
+        TextRole::Restyled => Rgb::RESTYLED,
     }
 }
 
