@@ -273,6 +273,31 @@ fn change_next_to_text_that_is_left_out_does_not_cover_it() {
     assert_eq!(changes[0].sides.old.areas(), [cells(0, 0, 0..3)]);
 }
 
+#[test]
+fn change_around_text_that_is_left_out_does_not_cover_it() {
+    let page = |before: &str, after: &str| {
+        PageBuilder::new()
+            .text(&format!("{before} "))
+            .artifact()
+            .text("(p. 3)")
+            .body()
+            .text(&format!(" {after}"))
+    };
+    let changes = compare_with(
+        [page("old", "words")],
+        [page("new", "text")],
+        &Filters::default(),
+    );
+    assert_eq!(
+        summaries(&changes),
+        [(ChangeKind::Replaced, "old words", "new text")]
+    );
+    assert_eq!(
+        changes[0].sides.old.areas(),
+        [cells(0, 0, 0..3), cells(0, 0, 11..16)]
+    );
+}
+
 /// The two pages of a table of four rows, of which `rows_on_first_page` come
 /// before the page break and the others after the header that it repeats.
 fn table_over_two_pages(header: &str, rows_on_first_page: usize) -> [PageBuilder; 2] {

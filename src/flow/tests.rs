@@ -136,6 +136,49 @@ fn hard_hyphen_that_the_producer_marks_stays_in_the_text() {
     assert_eq!(flow.tokens[1].fragments[0].line_index, 0);
 }
 
+/// Whether each token but the first follows the one before it.
+fn follows(flow: &Flow) -> Vec<bool> {
+    let pairs = flow.tokens.windows(2);
+    pairs.map(|pair| pair[1].follows(&pair[0])).collect()
+}
+
+#[test]
+fn token_follows_the_one_before_it_unless_text_between_them_is_left_out() {
+    let page = PageBuilder::new()
+        .text("one two ")
+        .artifact()
+        .text("(p. 3)")
+        .body()
+        .text(" three");
+    let flow = flow_of([page]);
+    assert_eq!(texts(&flow), ["one", "two", "three"]);
+    assert_eq!(follows(&flow), [true, false]);
+}
+
+#[test]
+fn hyphen_that_stays_in_the_text_follows_its_word_and_the_next_word_follows_it() {
+    let page = PageBuilder::new()
+        .text("well")
+        .actual_text("-")
+        .line_end_hyphen()
+        .body()
+        .text("known");
+    let flow = flow_of([page]);
+    assert_eq!(texts(&flow), ["well", "-", "known"]);
+    assert_eq!(follows(&flow), [true, true]);
+}
+
+#[test]
+fn token_after_a_word_that_was_rejoined_follows_it() {
+    let page = PageBuilder::new()
+        .text("inter")
+        .line_end_hyphen()
+        .text("national one");
+    let flow = flow_of([page]);
+    assert_eq!(texts(&flow), ["international", "one"]);
+    assert_eq!(follows(&flow), [true]);
+}
+
 #[test]
 fn unmarked_hyphen_is_soft_in_a_font_whose_hard_hyphens_are_marked() {
     let page = PageBuilder::new()

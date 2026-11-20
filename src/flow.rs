@@ -11,6 +11,7 @@ mod join;
 mod tests;
 
 use std::borrow::Cow;
+use std::ops::Range;
 
 use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfkc_quick};
 
@@ -118,9 +119,20 @@ pub struct Token {
     /// The styles of the characters, as indices into [`Flow::styles`]: one
     /// for each run of characters in one style.
     pub styles: Vec<usize>,
+    /// Where the token stands in the [`RawFlow`]: the indices of its parts
+    /// there, from the first one to after the last one.
+    /// A hyphen that became a token of its own has no part there, and its
+    /// range is empty, at the place where it stands.
+    pub raw_indices: Range<usize>,
 }
 
 impl Token {
+    /// Whether the token comes right after `previous` in the document as it
+    /// is read: no token stands between the two, compared or left out.
+    pub fn follows(&self, previous: &Token) -> bool {
+        self.raw_indices.start == previous.raw_indices.end
+    }
+
     /// The form of the text that is compared: compatibility characters such as
     /// ligatures are folded into their plain equivalents.
     pub fn key(&self) -> Cow<'_, str> {

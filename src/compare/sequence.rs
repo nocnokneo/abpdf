@@ -45,15 +45,6 @@ impl<'a> Sequence<'a> {
         let end = self.flow.tokens.len();
         self.indices.get(position).copied().unwrap_or(end)
     }
-
-    /// The tokens at a range of positions, each with its index in the flow.
-    pub fn indexed_tokens(
-        &self,
-        positions: Range<usize>,
-    ) -> impl Iterator<Item = (usize, &'a Token)> {
-        let indices = self.indices[positions.clone()].iter().copied();
-        indices.zip(self.tokens[positions].iter().copied())
-    }
 }
 
 /// The indices below `len` that are in none of `ranges`, which ascend.

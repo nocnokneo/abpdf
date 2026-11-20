@@ -30,7 +30,7 @@ pub(super) fn change_at(
         }
         tokens => ChangeSide::Text {
             text: text_of(tokens),
-            areas: areas_of(sequences[side].indexed_tokens(hunk[side].clone())),
+            areas: areas_of(tokens.iter().copied()),
         },
     });
     Change {
@@ -54,10 +54,11 @@ pub(super) fn moved(moved: &Move, sequences: &BySide<Sequence>) -> Change {
                 .iter()
                 .any(|hunk| hunk[side].contains(&index))
         };
-        let tokens = sequences[side].indexed_tokens(positions.clone());
+        let tokens = &sequences[side].tokens;
+        let same = positions.clone().filter(|index| !differs(*index));
         ChangeSide::Text {
-            text: text_of(&sequences[side].tokens[positions]),
-            areas: areas_of(tokens.filter(|(index, _)| !differs(*index))),
+            text: text_of(&tokens[positions.clone()]),
+            areas: areas_of(same.map(|index| tokens[index])),
         }
     });
     Change {
@@ -74,10 +75,10 @@ pub(super) fn restyled(
     differences: Vec<StyleDifference>,
 ) -> Change {
     let sides = BySide::from_fn(|side| {
-        let positions = positions[side].clone();
+        let tokens = &sequences[side].tokens[positions[side].clone()];
         ChangeSide::Text {
-            text: text_of(&sequences[side].tokens[positions.clone()]),
-            areas: areas_of(sequences[side].indexed_tokens(positions)),
+            text: text_of(tokens),
+            areas: areas_of(tokens.iter().copied()),
         }
     });
     Change {
@@ -97,19 +98,19 @@ fn text_of(tokens: &[&Token]) -> String {
     text
 }
 
-/// The bounds of tokens, each given with its index in the flow, merged per
-/// line.
-/// Tokens that other tokens of the flow stand between are not merged, so
-/// that an area does not cover those.
-fn areas_of<'a>(tokens: impl IntoIterator<Item = (usize, &'a Token)>) -> Vec<Area> {
+/// The bounds of tokens, merged per line.
+/// Tokens that other tokens of the document stand between are not merged,
+/// so that an area does not cover those: neither text that belongs to
+/// another change nor text that is left out of the comparison.
+fn areas_of<'a>(tokens: impl IntoIterator<Item = &'a Token>) -> Vec<Area> {
     let mut areas: Vec<Area> = Vec::new();
-    // The index and the line of the fragment before.
-    let mut last = None;
-    for (index, token) in tokens {
+    // The token and the line of the fragment before.
+    let mut last: Option<(&Token, (usize, usize))> = None;
+    for token in tokens {
         for fragment in &token.fragments {
             let line = (fragment.page_index, fragment.line_index);
-            let continues_last = last.is_some_and(|(last_index, last_line)| {
-                last_line == line && index <= last_index + 1
+            let continues_last = last.is_some_and(|(last_token, last_line)| {
+                last_line == line && token.follows(last_token)
             });
             match areas.last_mut() {
                 Some(area) if continues_last => {
@@ -120,7 +121,7 @@ fn areas_of<'a>(tokens: impl IntoIterator<Item = (usize, &'a Token)>) -> Vec<Are
                     bounds: fragment.bounds,
                 }),
             }
-            last = Some((index, line));
+            last = Some((token, line));
         }
     }
     areas
