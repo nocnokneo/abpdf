@@ -62,6 +62,11 @@ pub struct Span {
     /// first and separated by `/`, such as `Document/Table/TBody/TR/TD`.
     /// `None` when the run is not part of the structure tree.
     pub structure_path: Option<String>,
+    /// The table cell that contains the run, as its number among the cells
+    /// of the page.
+    /// `None` when the run is in no cell, or when no structure tree says
+    /// which cell it is in.
+    pub cell: Option<usize>,
     /// The text the producer says the run stands for, when that is not what
     /// its glyphs map to.
     pub actual_text: Option<String>,

@@ -92,6 +92,9 @@ pub struct RawToken {
     pub styles: Vec<usize>,
     /// Whether the producer marked the token as an artifact.
     pub is_artifact: bool,
+    /// The table cell that the token is in, if the producer says that it is
+    /// in one.
+    pub cell: Option<Cell>,
     /// The hyphen that ends a line right after the token.
     pub line_end_hyphen: Option<LineEndHyphen>,
 }
@@ -119,6 +122,9 @@ pub struct Token {
     /// The styles of the characters, as indices into [`Flow::styles`]: one
     /// for each run of characters in one style.
     pub styles: Vec<usize>,
+    /// The table cell that the token is in, if the producer says that it is
+    /// in one.
+    pub cell: Option<Cell>,
     /// Where the token stands in the [`RawFlow`]: the indices of its parts
     /// there, from the first one to after the last one.
     /// A hyphen that became a token of its own has no part there, and its
@@ -167,6 +173,14 @@ pub struct Fragment {
     /// Counts the lines of the page in reading order.
     pub line_index: usize,
     pub bounds: Rect,
+}
+
+/// A table cell of a document.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Cell {
+    pub page_index: usize,
+    /// Counts the cells of the page.
+    pub index: usize,
 }
 
 /// The white space between two tokens.

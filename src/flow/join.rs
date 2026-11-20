@@ -181,6 +181,7 @@ fn hyphen_token(hyphen: &LineEndHyphen, word: &Token) -> Token {
         fragments: vec![hyphen.fragment],
         gap: Gap::None,
         styles: word.styles.last().copied().into_iter().collect(),
+        cell: word.cell,
         raw_indices: after_word..after_word,
     }
 }
@@ -204,6 +205,7 @@ fn token_of(raw: RawToken, raw_index: usize) -> Token {
         fragments: vec![raw.fragment],
         gap: raw.gap,
         styles: raw.styles,
+        cell: raw.cell,
         raw_indices: raw_index..raw_index + 1,
     }
 }

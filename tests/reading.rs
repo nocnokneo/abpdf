@@ -5,7 +5,7 @@ mod common;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use abpdf::flow::{Exclusion, Flow, Token};
+use abpdf::flow::{Cell, Exclusion, Flow, Token};
 use abpdf::reader::pdfium::PdfiumReader;
 use abpdf::reader::{Color, Page, ReadError, Reader, Span, TextItem};
 
@@ -256,6 +256,32 @@ fn structure_path_names_the_elements_around_a_run() {
     let untagged = pages_of("reading-untagged.pdf");
     let mut spans = untagged.iter().flat_map(|page| &page.spans);
     assert!(spans.all(|span| span.structure_path.is_none()));
+}
+
+#[test]
+fn tokens_of_a_table_know_their_cell() {
+    let flow = tagged();
+    let tokens = flow.tokens.iter();
+    let first_row = tokens
+        .clone()
+        .position(|token| token.text == "Row")
+        .expect("the table has a row");
+    // "Row 0" and "Value number 0" are the cells of the first row, and
+    // "Row" starts the second.
+    let cells: Vec<Option<Cell>> = flow.tokens[first_row..first_row + 6]
+        .iter()
+        .map(|token| token.cell)
+        .collect();
+    assert!(cells.iter().all(Option::is_some), "{cells:?}");
+    assert_eq!(cells[0], cells[1]);
+    assert_eq!((cells[2], cells[3]), (cells[3], cells[4]));
+    assert_ne!(cells[1], cells[2]);
+    assert_ne!(cells[4], cells[5]);
+    assert_ne!(cells[0], cells[5]);
+
+    assert_eq!(token(&flow, "quotes").cell, None);
+    let mut untagged_tokens = untagged().tokens.into_iter();
+    assert!(untagged_tokens.all(|token| token.cell.is_none()));
 }
 
 #[test]

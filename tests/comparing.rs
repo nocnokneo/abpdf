@@ -21,8 +21,12 @@ const STORAGE_NEW: &str =
     "Store the instrument in its case when it is not in use, in a cool room that is free of dust.";
 const CHECK: &str = "Check the supply voltage at the start of every series of measurements.";
 
-/// What the edits in the source have to be reported as.
-const EDITS: [(ChangeKind, &str, &str); REVISIONS_CHANGE_COUNT] = [
+/// The kind and the two texts of a change.
+type Edit<'a> = (ChangeKind, &'a str, &'a str);
+
+/// What the edits in the source have to be reported as where the revisions
+/// are tagged.
+const EDITS: [Edit<'static>; REVISIONS_CHANGE_COUNT] = [
     (Inserted, "", "Monitoring"),
     (
         Inserted,
@@ -51,6 +55,12 @@ const EDITS: [(ChangeKind, &str, &str); REVISIONS_CHANGE_COUNT] = [
         "Monitoring interface Figure: The monitoring interface",
     ),
     (Replaced, "250", "300"),
+    (
+        Replaced,
+        "Setting number 12 of the controller",
+        "Threshold of the detector",
+    ),
+    (Replaced, "210", "215"),
     (Inserted, "", "P19 Interval of the monitoring interface 60"),
     (Deleted, ",", ""),
     (Replaced, ".", "!"),
@@ -60,6 +70,23 @@ const EDITS: [(ChangeKind, &str, &str); REVISIONS_CHANGE_COUNT] = [
     (Moved, STORAGE_OLD, STORAGE_NEW),
     (Replaced, "dry", "cool"),
 ];
+
+/// What the edits have to be reported as without tags, which leaves the two
+/// cells that change next to each other one change.
+fn edits_without_tags() -> Vec<Edit<'static>> {
+    let mut edits = EDITS.to_vec();
+    let second_cell = edits
+        .iter()
+        .position(|edit| edit.1 == "210")
+        .expect("the edits have the cell");
+    let both_cells = (
+        Replaced,
+        "Setting number 12 of the controller 210",
+        "Threshold of the detector 215",
+    );
+    edits.splice(second_cell - 1..=second_cell, [both_cells]);
+    edits
+}
 
 /// The old and the new revision, with or without tags.
 fn revisions(tagging: &str) -> BySide<Arc<Vec<u8>>> {
@@ -74,7 +101,7 @@ fn compare_revisions(tagging: &str, filters: &Filters) -> Comparison {
     compare(revisions(tagging), filters)
 }
 
-fn summaries(comparison: &Comparison) -> Vec<(ChangeKind, &str, &str)> {
+fn summaries(comparison: &Comparison) -> Vec<Edit<'_>> {
     comparison
         .changes
         .iter()
@@ -91,10 +118,10 @@ fn summaries(comparison: &Comparison) -> Vec<(ChangeKind, &str, &str)> {
 
 #[test]
 fn revisions_differ_by_their_edits() {
-    for tagging in ["tagged", "untagged"] {
-        let comparison = compare_revisions(tagging, &profile().filters);
-        assert_eq!(summaries(&comparison), EDITS, "{tagging}");
-    }
+    let tagged = compare_revisions("tagged", &profile().filters);
+    assert_eq!(summaries(&tagged), EDITS);
+    let untagged = compare_revisions("untagged", &profile().filters);
+    assert_eq!(summaries(&untagged), edits_without_tags());
 }
 
 #[test]

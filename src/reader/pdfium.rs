@@ -73,12 +73,12 @@ impl Reader for PdfiumReader {
             page_number: page_index + 1,
         })?;
         let page_space = PageSpace::new(page.visible_box(), page.clockwise_quarter_turns());
-        let structure_paths = if self.is_tagged {
-            structure::paths_by_marked_content_id(&page)
+        let structures = if self.is_tagged {
+            structure::by_marked_content_id(&page)
         } else {
             HashMap::new()
         };
-        let (spans, text) = text::read(&page, &page_space, &structure_paths);
+        let (spans, text) = text::read(&page, &page_space, &structures);
         Ok(Page {
             size: page_space.size(),
             spans,

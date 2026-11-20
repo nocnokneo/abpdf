@@ -9,37 +9,70 @@ use super::handles::{LoadedPage, StructureElement};
 /// malformed tree cannot exhaust the stack.
 const MAX_DEPTH: usize = 64;
 
-/// The structure path of each piece of marked content on `page`, by its
-/// marked content identifier.
-pub(super) fn paths_by_marked_content_id(page: &LoadedPage) -> HashMap<c_int, String> {
-    let mut paths = HashMap::new();
-    if let Some(tree) = page.structure_tree() {
-        for element in tree.children() {
-            collect(&element, "", 0, &mut paths);
-        }
-    }
-    paths
+/// What the structure tree says about a piece of marked content.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct Structure {
+    /// The types of the elements that contain the content, outermost first
+    /// and separated by `/`.
+    pub path: String,
+    /// The table cell that contains the content: its number among the cells
+    /// of the page, which are counted in the order of the tree.
+    pub cell: Option<usize>,
 }
 
-fn collect(
-    element: &StructureElement,
-    parent_path: &str,
-    depth: usize,
-    paths: &mut HashMap<c_int, String>,
-) {
-    if depth > MAX_DEPTH {
-        return;
+/// The structure of each piece of marked content on `page`, by its marked
+/// content identifier.
+pub(super) fn by_marked_content_id(page: &LoadedPage) -> HashMap<c_int, Structure> {
+    let mut reader = TreeReader::default();
+    if let Some(tree) = page.structure_tree() {
+        for element in tree.children() {
+            reader.read(&element, "", None, 0);
+        }
     }
-    let type_name = element.type_name();
-    let path = if parent_path.is_empty() {
-        type_name
-    } else {
-        format!("{parent_path}/{type_name}")
-    };
-    for id in element.marked_content_ids() {
-        paths.entry(id).or_insert_with(|| path.clone());
-    }
-    for child in element.children() {
-        collect(&child, &path, depth + 1, paths);
+    reader.structures
+}
+
+#[derive(Default)]
+struct TreeReader {
+    structures: HashMap<c_int, Structure>,
+    cell_count: usize,
+}
+
+impl TreeReader {
+    /// Reads an element and the elements inside it.
+    /// `parent_cell` is the table cell that the element is in, if it is in
+    /// one.
+    fn read(
+        &mut self,
+        element: &StructureElement,
+        parent_path: &str,
+        parent_cell: Option<usize>,
+        depth: usize,
+    ) {
+        if depth > MAX_DEPTH {
+            return;
+        }
+        let type_name = element.type_name();
+        let cell = match type_name.as_str() {
+            "TD" | "TH" => {
+                self.cell_count += 1;
+                Some(self.cell_count - 1)
+            }
+            _ => parent_cell,
+        };
+        let path = if parent_path.is_empty() {
+            type_name
+        } else {
+            format!("{parent_path}/{type_name}")
+        };
+        for id in element.marked_content_ids() {
+            self.structures.entry(id).or_insert_with(|| Structure {
+                path: path.clone(),
+                cell,
+            });
+        }
+        for child in element.children() {
+            self.read(&child, &path, cell, depth + 1);
+        }
     }
 }

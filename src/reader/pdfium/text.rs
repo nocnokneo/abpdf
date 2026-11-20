@@ -5,6 +5,7 @@ use std::ffi::c_int;
 
 use super::handles::{LoadedPage, TextObject, TextPage};
 use super::page_space::PageSpace;
+use super::structure::Structure;
 use crate::reader::{Char, Span, Style, TextItem};
 
 /// What PDFium reports in place of a hyphen that ends a line inside a word.
@@ -16,12 +17,11 @@ const ITALIC_FONT_FLAG: c_int = 1 << 6;
 const REPLACEMENT_CHARACTER: char = '\u{FFFD}';
 
 /// The spans and the text of a page.
-/// `structure_paths` has the structure path of marked content by its
-/// identifier.
+/// `structures` has the structure of marked content by its identifier.
 pub(super) fn read(
     page: &LoadedPage,
     page_space: &PageSpace,
-    structure_paths: &HashMap<c_int, String>,
+    structures: &HashMap<c_int, Structure>,
 ) -> (Vec<Span>, Vec<TextItem>) {
     let Some(text_page) = page.text() else {
         return (Vec::new(), Vec::new());
@@ -29,7 +29,7 @@ pub(super) fn read(
     let mut reader = TextReader {
         text_page: &text_page,
         page_space,
-        structure_paths,
+        structures,
         spans: Vec::new(),
         span_by_object: HashMap::new(),
     };
@@ -40,7 +40,7 @@ pub(super) fn read(
 struct TextReader<'a> {
     text_page: &'a TextPage<'a>,
     page_space: &'a PageSpace,
-    structure_paths: &'a HashMap<c_int, String>,
+    structures: &'a HashMap<c_int, Structure>,
     spans: Vec<Span>,
     /// The span of each text object by its identity, and of the characters
     /// that no object draws under `None`.
@@ -113,6 +113,7 @@ impl TextReader<'_> {
             style: self.read_style(index),
             is_artifact: false,
             structure_path: None,
+            cell: None,
             actual_text: None,
         };
         let Some(object) = object else {
@@ -123,9 +124,11 @@ impl TextReader<'_> {
             // An inner mark, which comes later, overrides an outer one.
             span.actual_text = mark.text_property("ActualText").or(span.actual_text);
         }
-        span.structure_path = object
-            .marked_content_id()
-            .and_then(|id| self.structure_paths.get(&id).cloned());
+        let id = object.marked_content_id();
+        if let Some(structure) = id.and_then(|id| self.structures.get(&id)) {
+            span.structure_path = Some(structure.path.clone());
+            span.cell = structure.cell;
+        }
         span
     }
 

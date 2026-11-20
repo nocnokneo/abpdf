@@ -85,6 +85,11 @@ impl PageBuilder {
         self.span(|span| span.is_artifact = true)
     }
 
+    /// Starts a span in the table cell with this number.
+    pub(crate) fn cell(self, cell: usize) -> Self {
+        self.span(|span| span.cell = Some(cell))
+    }
+
     /// Starts a span in a style that differs from that of body text as
     /// `change` says.
     pub(crate) fn styled(self, change: impl FnOnce(&mut Style)) -> Self {
@@ -151,6 +156,7 @@ fn body_span() -> Span {
         },
         is_artifact: false,
         structure_path: None,
+        cell: None,
         actual_text: None,
     }
 }

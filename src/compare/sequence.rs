@@ -39,6 +39,11 @@ impl<'a> Sequence<'a> {
         self.keys.iter().map(|key| key.as_ref()).collect()
     }
 
+    /// The keys of the tokens at a range of positions.
+    pub fn keys_at(&self, positions: Range<usize>) -> &[Cow<'a, str>] {
+        &self.keys[positions]
+    }
+
     /// The index in the flow of the token at a position, or of the end of
     /// the flow for the position after the last token.
     pub fn index_at(&self, position: usize) -> usize {

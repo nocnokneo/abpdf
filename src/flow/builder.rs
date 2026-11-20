@@ -5,7 +5,7 @@ use std::mem;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::hyphen_marks::{self, HyphenMarks};
-use super::{Fragment, Gap, HyphenKind, LineEndHyphen, RawFlow, RawToken};
+use super::{Cell, Fragment, Gap, HyphenKind, LineEndHyphen, RawFlow, RawToken};
 use crate::geometry::{Rect, Size};
 use crate::reader::{Char, Page, Style, TextItem};
 
@@ -163,7 +163,7 @@ impl PageTokenizer<'_> {
     }
 
     fn push_token(&mut self, text: &str, characters: &[Char]) {
-        let first = &characters[0];
+        let first_span = &self.page.spans[characters[0].span];
         let bounds = characters
             .iter()
             .map(|character| character.bounds)
@@ -179,7 +179,11 @@ impl PageTokenizer<'_> {
             fragment: self.fragment(bounds),
             gap: mem::replace(&mut self.gap, Gap::None),
             styles,
-            is_artifact: self.page.spans[first.span].is_artifact,
+            is_artifact: first_span.is_artifact,
+            cell: first_span.cell.map(|index| Cell {
+                page_index: self.page_index,
+                index,
+            }),
             line_end_hyphen: None,
         });
     }

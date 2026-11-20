@@ -13,8 +13,8 @@ use abpdf::reader::pdfium::PdfiumReader;
 use abpdf::redline::{self, Redline};
 
 /// How many changes the edits of `tests/corpus/revisions.typ` have to be
-/// reported as.
-pub const REVISIONS_CHANGE_COUNT: usize = 15;
+/// reported as where the revisions are tagged.
+pub const REVISIONS_CHANGE_COUNT: usize = 17;
 
 /// The path of a file of the test corpus.
 pub fn corpus_path(file_name: &str) -> PathBuf {

@@ -441,6 +441,89 @@ fn line_at_another_place_across_the_page_is_not_taken_for_a_repeat() {
     assert_eq!(summaries(&changes), [(ChangeKind::Inserted, "", "x y")]);
 }
 
+/// A page with a row of table cells that have these texts.
+fn row(texts: &[&str]) -> PageBuilder {
+    let mut page = PageBuilder::new();
+    for (cell, text) in texts.iter().enumerate() {
+        page = page.cell(cell).text(&format!("{text} "));
+    }
+    page
+}
+
+fn compare_rows(old: &[&str], new: &[&str]) -> Vec<Change> {
+    compare_with([row(old)], [row(new)], &Filters::default())
+}
+
+#[test]
+fn cells_that_change_next_to_each_other_are_a_change_each() {
+    let changes = compare_rows(&["one", "two"], &["uno", "dos"]);
+    assert_eq!(
+        summaries(&changes),
+        [
+            (ChangeKind::Replaced, "one", "uno"),
+            (ChangeKind::Replaced, "two", "dos"),
+        ]
+    );
+    assert_eq!(changes[0].sides.old.areas(), [cells(0, 0, 0..3)]);
+    assert_eq!(changes[1].sides.old.areas(), [cells(0, 0, 4..7)]);
+}
+
+#[test]
+fn text_before_a_table_changes_apart_from_the_first_cell() {
+    let page = |before: &str, cell: &str| {
+        PageBuilder::new()
+            .text(&format!("{before}\n"))
+            .cell(0)
+            .text(cell)
+    };
+    let changes = compare_with(
+        [page("old", "one")],
+        [page("new", "uno")],
+        &Filters::default(),
+    );
+    assert_eq!(
+        summaries(&changes),
+        [
+            (ChangeKind::Replaced, "old", "new"),
+            (ChangeKind::Replaced, "one", "uno"),
+        ]
+    );
+}
+
+#[test]
+fn short_cell_that_stays_between_cells_that_change_is_no_change() {
+    // The diff takes a match as short as this one for a coincidence, and
+    // leaves it in the hunk of the words around it.
+    let changes = compare_rows(&["alpha", "x", "beta"], &["gamma", "x", "delta"]);
+    assert_eq!(
+        summaries(&changes),
+        [
+            (ChangeKind::Replaced, "alpha", "gamma"),
+            (ChangeKind::Replaced, "beta", "delta"),
+        ]
+    );
+}
+
+#[test]
+fn change_stays_whole_where_its_sides_have_different_numbers_of_cells() {
+    let changes = compare_rows(&["one"], &["uno", "dos"]);
+    assert_eq!(
+        summaries(&changes),
+        [(ChangeKind::Replaced, "one", "uno dos")]
+    );
+}
+
+#[test]
+fn change_stays_whole_where_a_cell_faces_text_outside_of_a_table() {
+    let old = PageBuilder::new().text("old\n").cell(0).text("one");
+    let new = PageBuilder::new().cell(0).text("uno\n").body().text("new");
+    let changes = compare_with([old], [new], &Filters::default());
+    assert_eq!(
+        summaries(&changes),
+        [(ChangeKind::Replaced, "old one", "uno new")]
+    );
+}
+
 #[test]
 fn text_that_stands_at_another_place_is_a_move() {
     let old = format!("{PARAGRAPH}\n{REST}");
