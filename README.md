@@ -2,7 +2,7 @@
 
 Compare `a.pdf` with `b.pdf` and get a side-by-side redline PDF.
 
-abpdf compares the text of two PDFs as one continuous flow, so content that moves to another page because something was inserted before it is not reported as a change.
+abpdf compares the text and the figures of two PDFs as one continuous flow, so content that moves to another page because something was inserted before it is not reported as a change.
 It is meant for revisions of generated documents: specifications, manuals, reports.
 
 **Status: under construction.**
@@ -19,7 +19,12 @@ abpdf lists the changes on standard output, in the order of the new document:
     + must be verified every month
     @ old p. 2 / new p. 7
     > A paragraph that moved from the second page to the seventh.
-    2 changes
+    @ old p. 9 / new p. 9
+    ~ size 10 pt → 12 pt: A sentence that is set larger now.
+    @ old p. 11 / new p. 11
+    - [image, 640 × 480 pixels]
+    + [image, 640 × 480 pixels]
+    4 changes
 
 Like `diff`, it exits with 0 if there are none, with 1 if there are some and with 2 if the comparison failed.
 
@@ -38,13 +43,15 @@ It is written even if there are none, as a summary that says so, unless `--only-
 The entries of the summary and the bookmarks of the PDF link to the changes.
 
 After the summary come the sheets.
-A sheet shows an old page on the left and a new page on the right, with removed text marked in red, added text in green and moved text in blue.
+A sheet shows an old page on the left and a new page on the right, with removed text marked in red, added text in green, moved text in blue and text in another style in orange.
+A figure is marked like text, with a border around it.
 A band across the gutter joins the two sides of a change and has its number in the summary.
 
 - A change is shown on the pages where it starts.
 - Any other page that a change is on is shown next to the page of the other document that has most of the same text, or alone if no page has any of it.
   The band of the change ends in the gutter on a sheet that shows one of its sides only.
 - Pages without a change are left out, and a note says which.
+- A mark covers what changed and nothing else: text that was left out of the comparison is not marked where it stands between words that changed.
 
 With `--audit`, the redline also shows what was left out of the comparison, to check the profile with.
 Text that was left out has an outline in a color that tells why, which the summary explains, and the pages without a change are shown too.
@@ -56,12 +63,45 @@ abpdf compares words and punctuation marks, and ignores how the text is broken i
 Text that the producer of the PDF marked as an artifact is not compared.
 In a tagged PDF from Typst that covers headers, footers, the leaders of the table of contents, table headers that are repeated after a page break, and text in `pdf.artifact`.
 
-Text that a page repeats at its top is not compared either: a running header, or the header of a table that continues from the page before.
-abpdf takes for such a repeat the first lines of a page that also stand on the page before, with the same words at the same places across the page.
-A repeat is still compared where the other document has the same text and does not repeat it there.
+Where nothing is marked, abpdf tells such page furniture by its place and does not compare it either:
+
+- A running header or footer is a line at the top or the bottom of a page that one of the two pages before or after it has too, at the same height and with the same words.
+  A number in it may count the pages.
+  Running headers and footers are only looked for in a PDF without artifacts.
+- The header of a table that continues from the page before is one of the first lines of a page that also stand on the page before, with the same words at the same places across the page.
+
+Text at such a place is still compared where the other document has the same text and not as page furniture.
 
 Text that stands at another place in the new document is reported as moved, if it has at least 20 characters.
 Where moved text also changed a little, what changed is reported as a change of its own.
+
+Text that both documents have is reported as restyled where its style differs:
+
+- the font, by its name
+- the font size
+- the color
+- the rotation
+- the weight and the slant, where the font has the same name
+
+Words in a row that differ in the same way are one change.
+
+Figures are compared like words.
+A figure is a picture that the producer of the PDF keeps together:
+
+- an image
+- a drawing that the PDF holds as one object, which is what a PDF file that a document includes becomes
+- in a tagged PDF, the shapes that one figure tag holds
+
+A figure is reported as replaced if it looks different: if it has other pixels, other shapes, or other colors or line widths.
+Where on its page it stands does not matter.
+A change names a figure as what it is, such as `[image, 640 × 480 pixels]` or `[drawing, 12 parts]`.
+
+Shapes that a page draws one by one are not compared, because nothing in the PDF says which of them belong together.
+That is how a diagram arrives that is made with the drawing commands of Typst, and how an SVG image arrives in a PDF from Typst without tags.
+Text in them is compared like any other text.
+
+In a tagged PDF, a change does not go from one table cell into the next: where the text of several cells changes, each cell is a change of its own.
+Without tags nothing tells the cells apart, and changed cells that follow each other are one change.
 
 ### Profile
 
@@ -69,7 +109,8 @@ A profile is a TOML file with what else to ignore.
 Every setting is optional.
 
 ```toml
-# Text within these distances of the top and the bottom edge of a page.
+# Text within these distances of the top and the bottom edge of a page,
+# for headers and footers that are not found by themselves.
 header_height_points = 95
 footer_height_points = 50
 
@@ -108,10 +149,13 @@ ignore_patterns = [
 ```
 
 - The changes are in the order of the new document.
-- `kind` is `inserted`, `deleted`, `replaced` or `moved`.
+- `kind` is `inserted`, `deleted`, `replaced`, `moved` or `restyled`.
 - Text that moved has its old place in `old` and its new place in `new`.
-- A side has one area for each line that its text is on.
+- Text that is restyled has a list `style` of what differs, such as `{ "property": "size", "old": 10.0, "new": 12.0 }`.
+  The property is `font`, `size`, `weight`, `italic`, `color` or `rotation`.
+- A side has one area for each line that its text is on, and one for each figure.
   Pages are numbered from 1, and the edges of an area are distances in points from the left and the top edge of its page.
+- A figure is in `text` as what it is, such as `[image, 640 × 480 pixels]`, and its area has `"figure": true`.
 - The side of a change that has no text has one area of no width, at the place where the text of the other side would be.
   It has no area if its document has no text at all.
 

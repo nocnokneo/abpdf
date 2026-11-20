@@ -5,9 +5,9 @@ mod common;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use abpdf::flow::{Exclusion, Flow, Token};
+use abpdf::flow::{Cell, Exclusion, FIGURE_TEXT, Figure, Flow, Token};
 use abpdf::reader::pdfium::PdfiumReader;
-use abpdf::reader::{Color, Page, ReadError, Reader, Span, TextItem};
+use abpdf::reader::{Color, FigureKind, Page, ReadError, Reader, Span, TextItem};
 
 use common::{corpus, flow_of, raw_flow_of, texts, token};
 
@@ -37,19 +37,43 @@ fn span_of<'a>(pages: &'a [Page], text: &str) -> &'a Span {
             .iter()
             .map(|item| match item {
                 TextItem::Char(character) => character.text,
-                TextItem::Space | TextItem::LineBreak => ' ',
+                TextItem::Space | TextItem::LineBreak | TextItem::Figure(_) => ' ',
             })
             .collect();
         let item_index = page_text[..page_text.find(text)?].chars().count();
         match &page.text[item_index] {
             TextItem::Char(character) => Some(&page.spans[character.span]),
-            TextItem::Space | TextItem::LineBreak => None,
+            TextItem::Space | TextItem::LineBreak | TextItem::Figure(_) => None,
         }
     };
     pages
         .iter()
         .find_map(span_on)
         .unwrap_or_else(|| panic!("no page reads {text:?}"))
+}
+
+/// The image of `tests/corpus/figures.typ`.
+const SENSOR: FigureKind = FigureKind::Image {
+    pixel_width: 24,
+    pixel_height: 16,
+};
+/// Its chart, whose shapes only tags keep together.
+const CHART: FigureKind = FigureKind::Drawing { part_count: 5 };
+/// The drawing that it includes as a PDF.
+const INCLUDED_DRAWING: FigureKind = FigureKind::Drawing { part_count: 3 };
+
+/// The kinds of the figures of a PDF of the corpus, in reading order.
+fn figure_kinds(file_name: &str) -> Vec<FigureKind> {
+    let pages = pages_of(file_name);
+    let figures = pages.iter().flat_map(|page| &page.figures);
+    figures.map(|figure| figure.kind).collect()
+}
+
+/// The figures of a revision of `tests/corpus/figures.typ` as tokens.
+fn figure_tokens(revision: &str) -> Vec<Figure> {
+    let flow = flow_of(corpus(&format!("figures-{revision}-tagged.pdf")));
+    let tokens = flow.tokens.into_iter();
+    tokens.filter_map(|token| token.figure).collect()
 }
 
 /// Whether `sequence` occurs in `texts` without gaps.
@@ -93,10 +117,14 @@ fn pages_are_measured_in_points() {
 
 #[test]
 fn positions_are_measured_from_the_top_left_corner() {
-    let flow = untagged();
+    let flow = raw_flow_of(corpus("reading-untagged.pdf"));
     let page_height = flow.page_sizes[0].height;
-    let header = token(&flow, "Reading").fragments[0].bounds;
-    let footer = token(&flow, "Page").fragments[0].bounds;
+    let bounds_of = |text: &str| {
+        let token = flow.tokens.iter().find(|token| token.text == text);
+        token.expect("the page has the text").fragment.bounds
+    };
+    let header = bounds_of("Reading");
+    let footer = bounds_of("Page");
 
     let side_margin = 1.5 * POINTS_PER_CENTIMETER;
     let top_and_bottom_margin = 2.0 * POINTS_PER_CENTIMETER;
@@ -151,16 +179,28 @@ fn table_header_is_excluded_where_it_repeats() {
 }
 
 #[test]
-fn without_tags_only_what_pages_repeat_at_their_tops_is_excluded() {
+fn page_furniture_is_excluded_by_its_place_when_nothing_marks_it() {
     let flow = untagged();
+    let texts_excluded_as = |exclusion: Exclusion| -> BTreeSet<&str> {
+        let excluded = flow.excluded.iter();
+        excluded
+            .filter(|excluded| excluded.exclusion == exclusion)
+            .map(|excluded| excluded.token.text.as_str())
+            .collect()
+    };
+    // The running header, and the header of the table on the two pages that
+    // start with it.
+    assert_eq!(
+        texts_excluded_as(Exclusion::RunningHeader),
+        BTreeSet::from(["Draft", "Key", "Reading", "Value", "corpus"])
+    );
+    assert_eq!(
+        texts_excluded_as(Exclusion::RunningFooter),
+        BTreeSet::from(["1", "2", "3", "4", "Page", "of"])
+    );
+    let by_place = [Exclusion::RunningHeader, Exclusion::RunningFooter];
     let mut excluded = flow.excluded.iter();
-    assert!(excluded.all(|excluded| excluded.exclusion == Exclusion::Repeat));
-
-    let excluded_tokens = flow.excluded.iter().map(|excluded| &excluded.token);
-    let excluded_texts: BTreeSet<&str> = texts(excluded_tokens).into_iter().collect();
-    // The running header and the header of the table.
-    let repeated = ["Draft", "Key", "Reading", "Value", "corpus"];
-    assert_eq!(excluded_texts, BTreeSet::from(repeated));
+    assert!(excluded.all(|excluded| by_place.contains(&excluded.exclusion)));
 }
 
 #[test]
@@ -243,6 +283,32 @@ fn structure_path_names_the_elements_around_a_run() {
 }
 
 #[test]
+fn tokens_of_a_table_know_their_cell() {
+    let flow = tagged();
+    let tokens = flow.tokens.iter();
+    let first_row = tokens
+        .clone()
+        .position(|token| token.text == "Row")
+        .expect("the table has a row");
+    // "Row 0" and "Value number 0" are the cells of the first row, and
+    // "Row" starts the second.
+    let cells: Vec<Option<Cell>> = flow.tokens[first_row..first_row + 6]
+        .iter()
+        .map(|token| token.cell)
+        .collect();
+    assert!(cells.iter().all(Option::is_some), "{cells:?}");
+    assert_eq!(cells[0], cells[1]);
+    assert_eq!((cells[2], cells[3]), (cells[3], cells[4]));
+    assert_ne!(cells[1], cells[2]);
+    assert_ne!(cells[4], cells[5]);
+    assert_ne!(cells[0], cells[5]);
+
+    assert_eq!(token(&flow, "quotes").cell, None);
+    let mut untagged_tokens = untagged().tokens.into_iter();
+    assert!(untagged_tokens.all(|token| token.cell.is_none()));
+}
+
+#[test]
 fn style_is_read() {
     let pages = pages_of("reading-untagged.pdf");
     let style_of = |text| &span_of(&pages, text).style;
@@ -282,4 +348,85 @@ fn page_that_does_not_exist_is_an_error() {
         result,
         Err(ReadError::InvalidPage { page_number: 5 })
     ));
+}
+
+#[test]
+fn images_and_included_drawings_are_figures() {
+    assert_eq!(
+        figure_kinds("figures-old-untagged.pdf"),
+        [SENSOR, SENSOR, INCLUDED_DRAWING]
+    );
+}
+
+#[test]
+fn shapes_that_tags_keep_together_are_a_figure() {
+    assert_eq!(
+        figure_kinds("figures-old-tagged.pdf"),
+        [SENSOR, SENSOR, CHART, CHART, INCLUDED_DRAWING]
+    );
+}
+
+#[test]
+fn shapes_that_nothing_keeps_together_are_no_figure() {
+    // The rules of the table and the box of the drawing.
+    assert_eq!(figure_kinds("reading-tagged.pdf"), []);
+}
+
+#[test]
+fn figure_stands_in_the_text_before_its_labels_and_its_caption() {
+    let flow = flow_of(corpus("figures-old-tagged.pdf"));
+    let texts = texts(&flow.tokens);
+    let start = ["Figures", FIGURE_TEXT, "Figure", "1", ":", "The", "sensor"];
+    assert!(contains_sequence(&texts, &start), "{texts:?}");
+    let included_drawing = [FIGURE_TEXT, "Pump", "Tank", "Figure", "5"];
+    assert!(contains_sequence(&texts, &included_drawing), "{texts:?}");
+}
+
+#[test]
+fn bounds_of_a_figure_are_where_it_is_drawn() {
+    let pages = pages_of("figures-old-tagged.pdf");
+    let sensor = &pages[0].figures[0];
+    // The image is 2.4 cm wide, has square pixels and is centered.
+    let width = 2.4 * POINTS_PER_CENTIMETER;
+    let height = width * 16.0 / 24.0;
+    let center = (sensor.bounds.left + sensor.bounds.right) / 2.0;
+    assert!(
+        (sensor.bounds.width() - width).abs() < 0.01,
+        "{:?}",
+        sensor.bounds
+    );
+    assert!(
+        (sensor.bounds.height() - height).abs() < 0.01,
+        "{:?}",
+        sensor.bounds
+    );
+    assert!(
+        (center - pages[0].size.width / 2.0).abs() < 0.01,
+        "{:?}",
+        sensor.bounds
+    );
+    assert_eq!(sensor.points.len(), 4);
+}
+
+#[test]
+fn figure_looks_the_same_wherever_it_stands_on_its_page() {
+    // Every figure stands lower on the page of the new revision.
+    let (old, new) = (figure_tokens("old"), figure_tokens("new"));
+    let looks_the_same = |index: usize| old[index].looks_like(&new[index]);
+    // The second image and the second chart stay as they are.
+    assert!(looks_the_same(1));
+    assert!(looks_the_same(3));
+    // The first image has other pixels, a bar of the first chart grows and a
+    // box of the included drawing becomes wider.
+    assert!(!looks_the_same(0));
+    assert!(!looks_the_same(2));
+    assert!(!looks_the_same(4));
+}
+
+#[test]
+fn text_in_an_included_pdf_belongs_to_the_figure_that_includes_it() {
+    let pages = pages_of("figures-old-tagged.pdf");
+    let label = span_of(&pages, "Pump");
+    assert_eq!(label.structure_path.as_deref(), Some("Document/Div/Figure"));
+    assert!(!label.is_artifact);
 }

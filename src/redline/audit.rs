@@ -6,10 +6,11 @@ use std::collections::BTreeSet;
 use super::{LegendEntry, Mark, MarkStyle, Redline, Rgb};
 use crate::Side;
 use crate::change::Comparison;
-use crate::flow::{Exclusion, Flow};
+use crate::flow::{Exclusion, Flow, Token};
 
 const ARTIFACT_COLOR: Rgb = Rgb::new(128, 128, 128);
 const HEADER_AND_FOOTER_COLOR: Rgb = Rgb::new(153, 102, 51);
+const RUNNING_HEADER_AND_FOOTER_COLOR: Rgb = Rgb::new(120, 81, 169);
 const REPEAT_COLOR: Rgb = Rgb::new(0, 140, 140);
 /// The colors of the ignore patterns, which patterns after the last color
 /// start over with.
@@ -19,12 +20,6 @@ const PATTERN_COLORS: [Rgb; 4] = [
     Rgb::new(128, 128, 0),
     Rgb::new(0, 150, 220),
 ];
-
-/// How far apart two tokens of a line can be for one outline to go around
-/// both, as a share of the height of the line.
-/// It is more than the space between two words, and less than the space
-/// that text which is not left out would need between them.
-const MAX_GAP_IN_OUTLINE: f32 = 0.75;
 
 /// Adds to a redline of a comparison what the comparison left out: outlines
 /// on the pages of its sheets, and what their colors stand for.
@@ -44,32 +39,31 @@ pub(super) fn add_to(redline: &mut Redline, comparison: &Comparison) {
 
 /// Outlines around the tokens on a page that were left out, in the color of
 /// the rule that left them out.
-/// Tokens that follow each other closely on a line, left out by one rule,
-/// share an outline.
+/// Tokens of a line that one rule left out share an outline, unless text
+/// that is not theirs stands between them.
 fn marks_on(flow: &Flow, page_index: usize) -> Vec<Mark> {
     let mut marks: Vec<Mark> = Vec::new();
-    // The line and the rule of the last mark.
-    let mut last = None;
+    // The token, the line and the rule of the last mark.
+    let mut last: Option<(&Token, usize, Exclusion)> = None;
     for excluded in &flow.excluded {
-        let fragments = excluded.token.fragments.iter();
+        let token = &excluded.token;
+        let fragments = token.fragments.iter();
         for fragment in fragments.filter(|fragment| fragment.page_index == page_index) {
             let line_and_rule = (fragment.line_index, excluded.exclusion);
-            let bounds = fragment.bounds;
+            let continues_last = last.is_some_and(|(last_token, last_line, last_rule)| {
+                (last_line, last_rule) == line_and_rule && token.follows(last_token)
+            });
             match marks.last_mut() {
-                Some(mark)
-                    if last == Some(line_and_rule)
-                        && bounds.left - mark.bounds.right
-                            <= MAX_GAP_IN_OUTLINE * bounds.height() =>
-                {
-                    mark.bounds = mark.bounds.union(&bounds);
+                Some(mark) if continues_last => {
+                    mark.bounds = mark.bounds.union(&fragment.bounds);
                 }
                 _ => marks.push(Mark {
-                    bounds,
+                    bounds: fragment.bounds,
                     color: color_of(excluded.exclusion),
                     style: MarkStyle::Outline,
                 }),
             }
-            last = Some(line_and_rule);
+            last = Some((token, fragment.line_index, excluded.exclusion));
         }
     }
     marks
@@ -99,6 +93,7 @@ fn color_of(exclusion: Exclusion) -> Rgb {
     match exclusion {
         Exclusion::Artifact => ARTIFACT_COLOR,
         Exclusion::Header | Exclusion::Footer => HEADER_AND_FOOTER_COLOR,
+        Exclusion::RunningHeader | Exclusion::RunningFooter => RUNNING_HEADER_AND_FOOTER_COLOR,
         Exclusion::Pattern(index) => PATTERN_COLORS[index % PATTERN_COLORS.len()],
         Exclusion::Repeat => REPEAT_COLOR,
     }
@@ -109,6 +104,9 @@ fn description_of(exclusion: Exclusion) -> String {
         Exclusion::Artifact => "marked as an artifact by the producer of the PDF".to_owned(),
         Exclusion::Header | Exclusion::Footer => {
             "within the height of the header or the footer".to_owned()
+        }
+        Exclusion::RunningHeader | Exclusion::RunningFooter => {
+            "a header or a footer that runs from page to page".to_owned()
         }
         Exclusion::Pattern(index) => format!("matched by ignore pattern {}", index + 1),
         Exclusion::Repeat => "repeated at the top of a page".to_owned(),
@@ -139,23 +137,24 @@ mod tests {
     }
 
     #[test]
-    fn tokens_that_follow_each_other_closely_share_an_outline() {
+    fn tokens_of_a_line_share_an_outline_unless_other_text_stands_between_them() {
         let page = || {
             vec![
                 PageBuilder::new()
                     .artifact()
-                    .text("a-b c-d\ne")
+                    .text("a-b c-d")
                     .body()
-                    .text(" text"),
+                    .text(" text ")
+                    .artifact()
+                    .text("e\nf"),
             ]
         };
         let comparison = comparison_of(page, &Filters::default());
         assert_eq!(
             marks_on(&comparison.flows.new, 0),
             [
-                outline(0, 0..3, ARTIFACT_COLOR),
-                // After the space of the test page, which is a character wide.
-                outline(0, 4..7, ARTIFACT_COLOR),
+                outline(0, 0..7, ARTIFACT_COLOR),
+                outline(0, 13..14, ARTIFACT_COLOR),
                 outline(1, 0..1, ARTIFACT_COLOR),
             ]
         );

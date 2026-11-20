@@ -7,6 +7,7 @@
 //! for null and indices for their range, and reports a failure instead.
 
 use std::ffi::{c_int, c_uint, c_ulong, c_void};
+use std::ptr;
 
 use pdfium_render::prelude::{
     FPDF_DOCUMENT, FPDF_PAGE, FPDF_PAGEOBJECT, FPDF_PAGEOBJECTMARK, FPDF_STRUCTELEMENT,
@@ -14,6 +15,7 @@ use pdfium_render::prelude::{
 };
 
 use super::library::Library;
+use super::matrix::Matrix;
 use super::page_space::UserSpaceBox;
 use super::strings;
 use crate::reader::Color;
@@ -65,6 +67,17 @@ impl<'a> LoadedPage<'a> {
         (!handle.is_null()).then_some(TextPage {
             pdfium: self.pdfium,
             handle,
+        })
+    }
+
+    /// The objects that the page draws, in the order in which it draws them.
+    pub fn objects(&self) -> impl Iterator<Item = PageObject<'a>> {
+        let (pdfium, page) = (self.pdfium, self.handle);
+        // SAFETY: the page is loaded, and PDFium checks `index`.
+        let count = unsafe { pdfium.FPDFPage_CountObjects(page) }.max(0);
+        (0..count).filter_map(move |index| {
+            let handle = unsafe { pdfium.FPDFPage_GetObject(page, index) };
+            (!handle.is_null()).then_some(PageObject { pdfium, handle })
         })
     }
 
@@ -121,9 +134,9 @@ impl TextPage<'_> {
     }
 
     /// The text object that draws the character, if one does.
-    pub fn text_object(&self, index: c_int) -> Option<TextObject<'_>> {
+    pub fn text_object(&self, index: c_int) -> Option<PageObject<'_>> {
         let handle = unsafe { self.pdfium.FPDFText_GetTextObject(self.handle, index) };
-        (!handle.is_null()).then_some(TextObject {
+        (!handle.is_null()).then_some(PageObject {
             pdfium: self.pdfium,
             handle,
         })
@@ -156,24 +169,13 @@ impl TextPage<'_> {
 
     /// Opaque black if PDFium cannot tell.
     pub fn fill_color(&self, index: c_int) -> Color {
-        let (mut red, mut green, mut blue, mut alpha): (c_uint, c_uint, c_uint, c_uint) =
-            (0, 0, 0, u8::MAX.into());
+        let mut channels = OPAQUE_BLACK;
+        let [red, green, blue, alpha] = &mut channels;
         unsafe {
-            self.pdfium.FPDFText_GetFillColor(
-                self.handle,
-                index,
-                &mut red,
-                &mut green,
-                &mut blue,
-                &mut alpha,
-            );
+            self.pdfium
+                .FPDFText_GetFillColor(self.handle, index, red, green, blue, alpha);
         }
-        Color {
-            red: red as u8,
-            green: green as u8,
-            blue: blue as u8,
-            alpha: alpha as u8,
-        }
+        color(channels)
     }
 
     /// The clockwise rotation of the character, in radians from 0.
@@ -183,14 +185,7 @@ impl TextPage<'_> {
 
     /// The matrix that takes the character's text space to user space.
     pub fn matrix(&self, index: c_int) -> FS_MATRIX {
-        let mut matrix = FS_MATRIX {
-            a: 1.0,
-            b: 0.0,
-            c: 0.0,
-            d: 1.0,
-            e: 0.0,
-            f: 0.0,
-        };
+        let mut matrix = IDENTITY_MATRIX;
         unsafe {
             self.pdfium
                 .FPDFText_GetMatrix(self.handle, index, &mut matrix);
@@ -206,19 +201,201 @@ impl Drop for TextPage<'_> {
     }
 }
 
-/// A text object of a page, which the page owns.
+/// Something that a page draws, which the page owns: a piece of text, a
+/// path, an image, a shading, or a form, which is a group of such objects.
 #[derive(Clone, Copy)]
-pub(super) struct TextObject<'a> {
+pub(super) struct PageObject<'a> {
     pdfium: &'a Library,
     handle: FPDF_PAGEOBJECT,
 }
 
-// SAFETY, for every method: the object lives as long as its page, which the
-// text page it was taken from borrows.
-impl<'a> TextObject<'a> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) enum ObjectKind {
+    Text,
+    Path,
+    Image,
+    Shading,
+    Form,
+    Other,
+}
+
+/// One step of a path: a move, a line or a curve to a point.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct PathSegment {
+    /// PDFium's number for the kind of step, one of `FPDF_SEGMENT_*`.
+    pub kind: c_int,
+    /// Whether the step ends a closed outline.
+    pub closes_outline: bool,
+    /// The point that the step goes to, in the space of its path.
+    pub point: (f32, f32),
+}
+
+/// How a path is painted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct PathPaint {
+    /// PDFium's number for the rule that says what is inside the path, one
+    /// of `FPDF_FILLMODE_*`, of which 0 is no fill.
+    pub fill_mode: c_int,
+    pub is_stroked: bool,
+}
+
+// SAFETY, for every method: the object lives as long as its page, which
+// whatever it was taken from borrows, and PDFium checks that the object is
+// of the kind that a function is for, and indices for their range.
+impl<'a> PageObject<'a> {
     /// What tells this object from the other objects of its page.
     pub fn identity(&self) -> usize {
         self.handle as usize
+    }
+
+    pub fn kind(&self) -> ObjectKind {
+        // The values of PDFium's `FPDF_PAGEOBJ_*`.
+        match unsafe { self.pdfium.FPDFPageObj_GetType(self.handle) } {
+            1 => ObjectKind::Text,
+            2 => ObjectKind::Path,
+            3 => ObjectKind::Image,
+            4 => ObjectKind::Shading,
+            5 => ObjectKind::Form,
+            _ => ObjectKind::Other,
+        }
+    }
+
+    /// The smallest upright rectangle around the object, in the space that
+    /// it is drawn in: that of its page, or that of the form it is part of.
+    /// `None` if PDFium cannot tell.
+    pub fn bounds(&self) -> Option<UserSpaceBox> {
+        let (mut left, mut bottom, mut right, mut top) = (0.0, 0.0, 0.0, 0.0);
+        let found = unsafe {
+            self.pdfium.FPDFPageObj_GetBounds(
+                self.handle,
+                &mut left,
+                &mut bottom,
+                &mut right,
+                &mut top,
+            )
+        };
+        (found != 0).then_some(UserSpaceBox {
+            left: left.into(),
+            bottom: bottom.into(),
+            right: right.into(),
+            top: top.into(),
+        })
+    }
+
+    /// The matrix that takes the object's own space to the space that it is
+    /// drawn in.
+    pub fn matrix(&self) -> Matrix {
+        let mut matrix = IDENTITY_MATRIX;
+        unsafe { self.pdfium.FPDFPageObj_GetMatrix(self.handle, &mut matrix) };
+        matrix.into()
+    }
+
+    /// The objects of a form, in the order in which it draws them.
+    /// Any other object has none.
+    pub fn form_objects(&self) -> impl Iterator<Item = PageObject<'a>> {
+        let (pdfium, form) = (self.pdfium, self.handle);
+        let count = unsafe { pdfium.FPDFFormObj_CountObjects(form) }.max(0);
+        (0..count as c_ulong).filter_map(move |index| {
+            let handle = unsafe { pdfium.FPDFFormObj_GetObject(form, index) };
+            (!handle.is_null()).then_some(PageObject { pdfium, handle })
+        })
+    }
+
+    /// The steps of a path.
+    /// Any other object has none.
+    pub fn path_segments(&self) -> impl Iterator<Item = PathSegment> + use<'a> {
+        let (pdfium, path) = (self.pdfium, self.handle);
+        let count = unsafe { pdfium.FPDFPath_CountSegments(path) }.max(0);
+        (0..count).filter_map(move |index| {
+            let segment = unsafe { pdfium.FPDFPath_GetPathSegment(path, index) };
+            if segment.is_null() {
+                return None;
+            }
+            let (mut x, mut y) = (0.0, 0.0);
+            // SAFETY: the segment is not null and lives as long as its path.
+            unsafe {
+                pdfium.FPDFPathSegment_GetPoint(segment, &mut x, &mut y);
+                Some(PathSegment {
+                    kind: pdfium.FPDFPathSegment_GetType(segment),
+                    closes_outline: pdfium.FPDFPathSegment_GetClose(segment) != 0,
+                    point: (x, y),
+                })
+            }
+        })
+    }
+
+    /// How a path is painted.
+    pub fn path_paint(&self) -> PathPaint {
+        let (mut fill_mode, mut is_stroked) = (0, 0);
+        unsafe {
+            self.pdfium
+                .FPDFPath_GetDrawMode(self.handle, &mut fill_mode, &mut is_stroked);
+        }
+        PathPaint {
+            fill_mode,
+            is_stroked: is_stroked != 0,
+        }
+    }
+
+    /// The color that the object is filled with, which is opaque black if
+    /// PDFium cannot tell.
+    pub fn fill_color(&self) -> Color {
+        let mut channels = OPAQUE_BLACK;
+        let [red, green, blue, alpha] = &mut channels;
+        unsafe {
+            self.pdfium
+                .FPDFPageObj_GetFillColor(self.handle, red, green, blue, alpha);
+        }
+        color(channels)
+    }
+
+    /// The color that the outline of the object is drawn in, which is
+    /// opaque black if PDFium cannot tell.
+    pub fn stroke_color(&self) -> Color {
+        let mut channels = OPAQUE_BLACK;
+        let [red, green, blue, alpha] = &mut channels;
+        unsafe {
+            self.pdfium
+                .FPDFPageObj_GetStrokeColor(self.handle, red, green, blue, alpha);
+        }
+        color(channels)
+    }
+
+    /// The width of the line that the outline of the object is drawn with,
+    /// in the object's own space.
+    pub fn stroke_width(&self) -> f32 {
+        let mut width = 0.0;
+        unsafe {
+            self.pdfium
+                .FPDFPageObj_GetStrokeWidth(self.handle, &mut width);
+        }
+        width
+    }
+
+    /// The numbers of columns and of rows of pixels of an image.
+    pub fn image_pixel_size(&self) -> (u32, u32) {
+        let (mut width, mut height): (c_uint, c_uint) = (0, 0);
+        unsafe {
+            self.pdfium
+                .FPDFImageObj_GetImagePixelSize(self.handle, &mut width, &mut height);
+        }
+        (width, height)
+    }
+
+    /// The data of an image as the PDF stores it, with the filters of its
+    /// stream undone.
+    pub fn image_data(&self) -> Vec<u8> {
+        let (pdfium, image) = (self.pdfium, self.handle);
+        // PDFium is asked for the length first, because it aborts if it is
+        // given a buffer that the data does not fit into.
+        let length = unsafe { pdfium.FPDFImageObj_GetImageDataDecoded(image, ptr::null_mut(), 0) };
+        let mut data = vec![0u8; length as usize];
+        if !data.is_empty() {
+            let buffer = data.as_mut_ptr() as *mut c_void;
+            // SAFETY: the buffer is as long as PDFium is told.
+            unsafe { pdfium.FPDFImageObj_GetImageDataDecoded(image, buffer, length) };
+        }
+        data
     }
 
     /// The identifier that ties the object to the structure tree, if it has
@@ -357,6 +534,27 @@ impl<'a> StructureElement<'a> {
             let handle = unsafe { pdfium.FPDF_StructElement_GetChildAtIndex(element, index) };
             (!handle.is_null()).then_some(StructureElement { pdfium, handle })
         })
+    }
+}
+
+const IDENTITY_MATRIX: FS_MATRIX = FS_MATRIX {
+    a: 1.0,
+    b: 0.0,
+    c: 0.0,
+    d: 1.0,
+    e: 0.0,
+    f: 0.0,
+};
+
+/// Red, green, blue and opacity.
+const OPAQUE_BLACK: [c_uint; 4] = [0, 0, 0, u8::MAX as c_uint];
+
+fn color([red, green, blue, alpha]: [c_uint; 4]) -> Color {
+    Color {
+        red: red as u8,
+        green: green as u8,
+        blue: blue as u8,
+        alpha: alpha as u8,
     }
 }
 

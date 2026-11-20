@@ -2,8 +2,8 @@
 //!
 //! The comparison is a pipeline; `docs/design.md` has the reasons behind it:
 //!
-//! 1. A [`reader`] reports the text of each page.
-//! 2. A [`flow`] is that text as one sequence of tokens across pages.
+//! 1. A [`reader`] reports the text and the figures of each page.
+//! 2. A [`flow`] is both as one sequence of tokens across pages.
 //! 3. [`flow::prepare`] leaves page furniture out of the comparison, as a
 //!    [`filter`] says, and rejoins the words that a line break splits.
 //! 4. A [`diff`] finds where the tokens of the two documents differ.

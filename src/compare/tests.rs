@@ -3,10 +3,15 @@ use regex::Regex;
 use std::ops::Range;
 
 use crate::BySide;
-use crate::change::{Area, Change, ChangeKind, ChangeSide, Comparison};
+use crate::change::{
+    Area, Change, ChangeKind, ChangeSide, Comparison, Difference, StyleDifference,
+};
 use crate::filter::Filters;
 use crate::flow::{Exclusion, Flow};
-use crate::testing::{PARAGRAPH, PageBuilder, REST, cell_bounds, comparison_of, raw_flow_of};
+use crate::testing::{
+    FIGURE_COLUMN_COUNT, FIGURE_WORDS, PARAGRAPH, PageBuilder, REST, bold_difference, cell_bounds,
+    comparison_of, comparison_of_built_pages, page_with_bold, page_with_figure, raw_flow_of,
+};
 
 fn compare_with(
     old: impl IntoIterator<Item = PageBuilder>,
@@ -44,6 +49,7 @@ fn cells(page_index: usize, line: usize, columns: Range<usize>) -> Area {
     Area {
         page_index,
         bounds: cell_bounds(line, columns),
+        is_figure: false,
     }
 }
 
@@ -268,6 +274,31 @@ fn change_next_to_text_that_is_left_out_does_not_cover_it() {
     assert_eq!(changes[0].sides.old.areas(), [cells(0, 0, 0..3)]);
 }
 
+#[test]
+fn change_around_text_that_is_left_out_does_not_cover_it() {
+    let page = |before: &str, after: &str| {
+        PageBuilder::new()
+            .text(&format!("{before} "))
+            .artifact()
+            .text("(p. 3)")
+            .body()
+            .text(&format!(" {after}"))
+    };
+    let changes = compare_with(
+        [page("old", "words")],
+        [page("new", "text")],
+        &Filters::default(),
+    );
+    assert_eq!(
+        summaries(&changes),
+        [(ChangeKind::Replaced, "old words", "new text")]
+    );
+    assert_eq!(
+        changes[0].sides.old.areas(),
+        [cells(0, 0, 0..3), cells(0, 0, 11..16)]
+    );
+}
+
 /// The two pages of a table of four rows, of which `rows_on_first_page` come
 /// before the page break and the others after the header that it repeats.
 fn table_over_two_pages(header: &str, rows_on_first_page: usize) -> [PageBuilder; 2] {
@@ -309,6 +340,36 @@ fn header_that_only_one_document_repeats_is_not_a_change() {
         compare_with(on_one_page, over_two_pages, &Filters::default()),
         []
     );
+}
+
+#[test]
+fn header_of_a_table_that_starts_a_page_is_compared() {
+    // The header stands at the top of two pages in a row, like a running
+    // header, but the other document has it as text.
+    let from_the_top_of_a_page = [
+        PageBuilder::new().text("intro text"),
+        PageBuilder::new().text("Key Value\na 1\nb 2"),
+        PageBuilder::new().text("Key Value\nc 3\nd 4\nend"),
+    ];
+    let changes = compare_with(
+        from_the_top_of_a_page,
+        table_over_two_pages("Key Value", 2),
+        &Filters::default(),
+    );
+    assert_eq!(changes, []);
+}
+
+#[test]
+fn change_to_a_running_header_or_footer_is_not_reported() {
+    let pages = |revision: &str, page_count: usize| {
+        ["one", "two", "three"].map(|body| {
+            PageBuilder::new().text(&format!(
+                "Manual revision {revision}\n{body}\nof {page_count}"
+            ))
+        })
+    };
+    let changes = compare_with(pages("A", 3), pages("B", 4), &Filters::default());
+    assert_eq!(changes, []);
 }
 
 #[test]
@@ -381,15 +442,87 @@ fn line_at_another_place_across_the_page_is_not_taken_for_a_repeat() {
     assert_eq!(summaries(&changes), [(ChangeKind::Inserted, "", "x y")]);
 }
 
+/// A page with a row of table cells that have these texts.
+fn row(texts: &[&str]) -> PageBuilder {
+    let mut page = PageBuilder::new();
+    for (cell, text) in texts.iter().enumerate() {
+        page = page.cell(cell).text(&format!("{text} "));
+    }
+    page
+}
+
+fn compare_rows(old: &[&str], new: &[&str]) -> Vec<Change> {
+    compare_with([row(old)], [row(new)], &Filters::default())
+}
+
 #[test]
-fn change_to_a_running_header_is_reported_on_the_first_page_only() {
-    let pages = |revision: &str| {
-        ["one", "two", "three"]
-            .map(|body| PageBuilder::new().text(&format!("Manual revision {revision}\n{body}")))
+fn cells_that_change_next_to_each_other_are_a_change_each() {
+    let changes = compare_rows(&["one", "two"], &["uno", "dos"]);
+    assert_eq!(
+        summaries(&changes),
+        [
+            (ChangeKind::Replaced, "one", "uno"),
+            (ChangeKind::Replaced, "two", "dos"),
+        ]
+    );
+    assert_eq!(changes[0].sides.old.areas(), [cells(0, 0, 0..3)]);
+    assert_eq!(changes[1].sides.old.areas(), [cells(0, 0, 4..7)]);
+}
+
+#[test]
+fn text_before_a_table_changes_apart_from_the_first_cell() {
+    let page = |before: &str, cell: &str| {
+        PageBuilder::new()
+            .text(&format!("{before}\n"))
+            .cell(0)
+            .text(cell)
     };
-    let changes = compare_with(pages("A"), pages("B"), &Filters::default());
-    assert_eq!(summaries(&changes), [(ChangeKind::Replaced, "A", "B")]);
-    assert_eq!(changes[0].location(), "old p. 1 / new p. 1");
+    let changes = compare_with(
+        [page("old", "one")],
+        [page("new", "uno")],
+        &Filters::default(),
+    );
+    assert_eq!(
+        summaries(&changes),
+        [
+            (ChangeKind::Replaced, "old", "new"),
+            (ChangeKind::Replaced, "one", "uno"),
+        ]
+    );
+}
+
+#[test]
+fn short_cell_that_stays_between_cells_that_change_is_no_change() {
+    // The diff takes a match as short as this one for a coincidence, and
+    // leaves it in the hunk of the words around it.
+    let changes = compare_rows(&["alpha", "x", "beta"], &["gamma", "x", "delta"]);
+    assert_eq!(
+        summaries(&changes),
+        [
+            (ChangeKind::Replaced, "alpha", "gamma"),
+            (ChangeKind::Replaced, "beta", "delta"),
+        ]
+    );
+}
+
+#[test]
+fn change_stays_whole_where_its_sides_have_different_numbers_of_cells() {
+    let changes = compare_rows(&["one"], &["uno", "dos"]);
+    assert_eq!(
+        summaries(&changes),
+        [(ChangeKind::Replaced, "one", "uno dos")]
+    );
+}
+
+#[test]
+fn change_stays_whole_where_a_cell_faces_text_outside_of_a_table() {
+    let old = PageBuilder::new().text("old\n").cell(0).text("one");
+    let new = PageBuilder::new().cell(0).text("uno\n").body().text("new");
+    let changes = compare_with([old], [new], &Filters::default());
+    assert_eq!(
+        summaries(&changes),
+        [(ChangeKind::Replaced, "old one", "uno new")]
+    );
 }
 
 #[test]
@@ -474,5 +607,252 @@ fn few_words_that_stand_at_another_place_are_removed_and_added() {
             (ChangeKind::Deleted, "to be", ""),
             (ChangeKind::Inserted, "", "to be")
         ]
+    );
+}
+
+/// The changes from a page of body text to a page with the same text, of
+/// which what stands between two `*` is bold.
+fn compare_with_bold(old: &str, new: &str) -> Vec<Change> {
+    comparison_of_built_pages([page_with_bold(old)], [page_with_bold(new)]).changes
+}
+
+fn style_differences(change: &Change) -> &[StyleDifference] {
+    match &change.difference {
+        Difference::Style(differences) => differences,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn text_in_another_style_is_restyled() {
+    let changes = compare_with_bold("one two three", "one *two* three");
+    assert_eq!(summaries(&changes), [(ChangeKind::Restyled, "two", "two")]);
+    assert_eq!(style_differences(&changes[0]), [bold_difference()]);
+    assert_eq!(changes[0].sides.old.areas(), [cells(0, 0, 4..7)]);
+    assert_eq!(changes[0].sides.new.areas(), [cells(0, 0, 4..7)]);
+}
+
+#[test]
+fn words_in_a_row_that_differ_in_the_same_way_are_one_change() {
+    let changes = compare_with_bold("one two three four", "one *two three* four");
+    assert_eq!(
+        summaries(&changes),
+        [(ChangeKind::Restyled, "two three", "two three")]
+    );
+}
+
+#[test]
+fn words_in_a_row_that_differ_in_other_ways_are_separate_changes() {
+    let old = PageBuilder::new().text("one two three four");
+    let new = PageBuilder::new()
+        .text("one ")
+        .bold()
+        .text("two ")
+        .styled(|style| style.is_italic = true)
+        .text("three")
+        .body()
+        .text(" four");
+    let changes = comparison_of_built_pages([old], [new]).changes;
+    assert_eq!(
+        summaries(&changes),
+        [
+            (ChangeKind::Restyled, "two", "two"),
+            (ChangeKind::Restyled, "three", "three")
+        ]
+    );
+    let slant = BySide {
+        old: false,
+        new: true,
+    };
+    assert_eq!(
+        style_differences(&changes[1]),
+        [StyleDifference::Italic(slant)]
+    );
+}
+
+#[test]
+fn word_with_a_part_in_another_style_is_restyled() {
+    let old = PageBuilder::new().text("of H2O here");
+    let new = PageBuilder::new()
+        .text("of H")
+        .styled(|style| style.font_size = 7.0)
+        .text("2")
+        .body()
+        .text("O here");
+    let changes = comparison_of_built_pages([old], [new]).changes;
+    assert_eq!(summaries(&changes), [(ChangeKind::Restyled, "H2O", "H2O")]);
+    let size = BySide {
+        old: 10.0,
+        new: 7.0,
+    };
+    assert_eq!(
+        style_differences(&changes[0]),
+        [StyleDifference::Size(size)]
+    );
+}
+
+#[test]
+fn sizes_and_rotations_that_are_all_but_the_same_do_not_differ() {
+    let old = PageBuilder::new().text("one two");
+    let new = PageBuilder::new()
+        .styled(|style| {
+            style.font_size += 0.01;
+            style.rotation_degrees += 0.1;
+        })
+        .text("one two");
+    assert_eq!(comparison_of_built_pages([old], [new]).changes, []);
+}
+
+#[test]
+fn name_of_a_font_stands_for_its_weight_and_its_slant() {
+    let old = PageBuilder::new().text("one two");
+    let new = PageBuilder::new()
+        .text("one ")
+        .styled(|style| {
+            style.font_name = "Body-BoldItalic".to_owned();
+            style.font_weight = Some(700);
+            style.is_italic = true;
+        })
+        .text("two");
+    let changes = comparison_of_built_pages([old], [new]).changes;
+    let font = BySide {
+        old: "Body".to_owned(),
+        new: "Body-BoldItalic".to_owned(),
+    };
+    assert_eq!(
+        style_differences(&changes[0]),
+        [StyleDifference::Font(font)]
+    );
+}
+
+#[test]
+fn style_of_text_that_is_replaced_is_not_compared() {
+    let changes = compare_with_bold("one two", "one *2*");
+    assert_eq!(summaries(&changes), [(ChangeKind::Replaced, "two", "2")]);
+}
+
+#[test]
+fn style_of_text_that_moved_is_compared() {
+    let old = format!("{PARAGRAPH}\n{REST}");
+    let new = format!("{REST}\nthis *paragraph* stands somewhere else now");
+    let changes = compare_with_bold(&old, &new);
+    assert_eq!(
+        summaries(&changes),
+        [
+            (ChangeKind::Moved, PARAGRAPH, PARAGRAPH),
+            (ChangeKind::Restyled, "paragraph", "paragraph")
+        ]
+    );
+    assert_eq!(changes[1].sides.old.areas(), [cells(0, 0, 5..14)]);
+    assert_eq!(changes[1].sides.new.areas(), [cells(0, 1, 5..14)]);
+}
+
+fn compare_built(old: PageBuilder, new: PageBuilder) -> Vec<Change> {
+    compare_with([old], [new], &Filters::default())
+}
+
+/// The area of a figure at the start of `line` of the first page.
+fn figure_area(line: usize) -> Area {
+    Area {
+        is_figure: true,
+        ..cells(0, line, 0..FIGURE_COLUMN_COUNT)
+    }
+}
+
+#[test]
+fn figure_that_only_the_new_document_has_is_inserted() {
+    let changes = compare_built(PageBuilder::new().text("one"), page_with_figure(|_| {}));
+    assert_eq!(
+        summaries(&changes),
+        [(ChangeKind::Inserted, "", FIGURE_WORDS)]
+    );
+    assert_eq!(changes[0].sides.new.areas(), [figure_area(1)]);
+}
+
+#[test]
+fn figure_with_other_content_is_replaced() {
+    let changes = compare_built(
+        page_with_figure(|_| {}),
+        page_with_figure(|figure| figure.content_hash = 1),
+    );
+    assert_eq!(
+        summaries(&changes),
+        [(ChangeKind::Replaced, FIGURE_WORDS, FIGURE_WORDS)]
+    );
+    assert_eq!(changes[0].sides.old.areas(), [figure_area(1)]);
+}
+
+#[test]
+fn figure_that_is_drawn_through_other_points_is_replaced() {
+    let changes = compare_built(
+        page_with_figure(|_| {}),
+        page_with_figure(|figure| figure.points[2].1 += 1.0),
+    );
+    assert_eq!(
+        summaries(&changes),
+        [(ChangeKind::Replaced, FIGURE_WORDS, FIGURE_WORDS)]
+    );
+}
+
+#[test]
+fn figure_at_another_place_on_its_page_is_no_change() {
+    let lower = PageBuilder::new().text("one\n\n\n").image();
+    assert_eq!(compare_built(page_with_figure(|_| {}), lower), []);
+}
+
+#[test]
+fn figure_changes_apart_from_the_text_before_it() {
+    let old = PageBuilder::new().text("old words\n").image();
+    let new = PageBuilder::new()
+        .text("new text\n")
+        .figure(|figure| figure.content_hash = 1);
+    assert_eq!(
+        summaries(&compare_built(old, new)),
+        [
+            (ChangeKind::Replaced, "old words", "new text"),
+            (ChangeKind::Replaced, FIGURE_WORDS, FIGURE_WORDS),
+        ]
+    );
+}
+
+#[test]
+fn figure_that_stays_between_texts_that_change_is_no_change() {
+    // The texts are longer than the key of the figure, so the diff takes
+    // the figure for a coincidence and leaves it in their hunk.
+    let page = |before: &str, after: &str| {
+        PageBuilder::new()
+            .text(&format!("{before}\n"))
+            .image()
+            .text(&format!("\n{after}"))
+    };
+    let changes = compare_built(
+        page("alpha beta gamma delta", "epsilon zeta eta theta"),
+        page("one two three four five", "six seven eight nine ten"),
+    );
+    assert_eq!(
+        summaries(&changes),
+        [
+            (
+                ChangeKind::Replaced,
+                "alpha beta gamma delta",
+                "one two three four five"
+            ),
+            (
+                ChangeKind::Replaced,
+                "epsilon zeta eta theta",
+                "six seven eight nine ten"
+            ),
+        ]
+    );
+}
+
+#[test]
+fn text_that_changes_stays_whole_around_a_figure_that_one_side_has() {
+    let old = PageBuilder::new().text("old words");
+    let new = PageBuilder::new().text("new\n").image().text("\ntext");
+    let with_figure = format!("new {FIGURE_WORDS} text");
+    assert_eq!(
+        summaries(&compare_built(old, new)),
+        [(ChangeKind::Replaced, "old words", with_figure.as_str())]
     );
 }

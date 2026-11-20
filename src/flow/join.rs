@@ -66,9 +66,10 @@ fn hyphenated(first: &str, second: &str) -> String {
 /// Sets the tokens that have an exclusion aside and resolves the line-end
 /// hyphens of the others.
 ///
-/// A soft hyphen joins its word to the next token that takes part in the
+/// A soft hyphen joins its word to the next text that takes part in the
 /// comparison, which may be on the next page with a footer and a header in
 /// between.
+/// A figure between the two comes after the word.
 /// A hard hyphen becomes a token of its own.
 /// `vocabulary` decides about a hyphen of unknown kind.
 pub(super) fn join(screened: Screened, vocabulary: &Vocabulary) -> Flow {
@@ -78,10 +79,18 @@ pub(super) fn join(screened: Screened, vocabulary: &Vocabulary) -> Flow {
     // The hyphen after the last of `tokens`, until the token after it tells
     // what it means.
     let mut open_hyphen: Option<LineEndHyphen> = None;
+    // Figures that stand between the parts of a word that a line break
+    // splits, and come after the word.
+    let mut figures_in_word: Vec<Token> = Vec::new();
 
-    for (raw, exclusion) in flow.tokens.into_iter().zip(exclusions) {
+    let screened_tokens = flow.tokens.into_iter().zip(exclusions);
+    for (raw_index, (raw, exclusion)) in screened_tokens.enumerate() {
         if let Some(exclusion) = exclusion {
-            excluded.push(excluded_token(raw, exclusion));
+            excluded.push(excluded_token(raw, raw_index, exclusion));
+            continue;
+        }
+        if open_hyphen.is_some() && raw.figure.is_some() {
+            figures_in_word.push(token_of(raw, raw_index));
             continue;
         }
         let mut gap = raw.gap;
@@ -92,34 +101,47 @@ pub(super) fn join(screened: Screened, vocabulary: &Vocabulary) -> Flow {
                     extend_to_hyphen(word, &hyphen);
                     word.text.push_str(&raw.text);
                     word.fragments.push(raw.fragment);
+                    word.styles.extend(raw.styles);
+                    word.styles.dedup();
+                    word.raw_indices.end = raw_index + 1;
                     open_hyphen = raw.line_end_hyphen;
+                    if open_hyphen.is_none() {
+                        tokens.append(&mut figures_in_word);
+                    }
                     continue;
                 }
                 Meaning::Punctuation => {
-                    tokens.push(hyphen_token(&hyphen));
+                    let hyphen = hyphen_token(&hyphen, word);
+                    tokens.push(hyphen);
                     gap = Gap::None;
                 }
                 Meaning::Nothing => extend_to_hyphen(word, &hyphen),
             }
+            tokens.append(&mut figures_in_word);
         }
         open_hyphen = raw.line_end_hyphen;
         tokens.push(Token {
             gap,
-            ..token_of(raw)
+            ..token_of(raw, raw_index)
         });
     }
 
     if let Some(hyphen) = open_hyphen {
         let word = tokens.last_mut().expect("a hyphen follows a token");
         match meaning(&hyphen, &word.text, None, vocabulary) {
-            Meaning::Punctuation => tokens.push(hyphen_token(&hyphen)),
+            Meaning::Punctuation => {
+                let hyphen = hyphen_token(&hyphen, word);
+                tokens.push(hyphen);
+            }
             _ => extend_to_hyphen(word, &hyphen),
         }
     }
+    tokens.append(&mut figures_in_word);
     Flow {
         tokens,
         excluded,
         page_sizes: flow.page_sizes,
+        styles: flow.styles,
     }
 }
 
@@ -163,32 +185,42 @@ fn extend_to_hyphen(word: &mut Token, hyphen: &LineEndHyphen) {
     last.bounds = last.bounds.union(&hyphen.fragment.bounds);
 }
 
-/// The hyphen as a token that follows its word directly.
-fn hyphen_token(hyphen: &LineEndHyphen) -> Token {
+/// The hyphen as a token that follows its word directly, in the style that
+/// the word ends in.
+fn hyphen_token(hyphen: &LineEndHyphen, word: &Token) -> Token {
+    let after_word = word.raw_indices.end;
     Token {
         text: "-".to_owned(),
+        figure: None,
         fragments: vec![hyphen.fragment],
         gap: Gap::None,
+        styles: word.styles.last().copied().into_iter().collect(),
+        cell: word.cell,
+        raw_indices: after_word..after_word,
     }
 }
 
 /// A token that is left out as it is read, with the hyphen that may end its
 /// line as part of where it is drawn.
-fn excluded_token(raw: RawToken, exclusion: Exclusion) -> ExcludedToken {
+fn excluded_token(raw: RawToken, raw_index: usize, exclusion: Exclusion) -> ExcludedToken {
     let hyphen = raw.line_end_hyphen;
-    let mut token = token_of(raw);
+    let mut token = token_of(raw, raw_index);
     if let Some(hyphen) = hyphen {
         extend_to_hyphen(&mut token, &hyphen);
     }
     ExcludedToken { token, exclusion }
 }
 
-/// The token as it is read: on one line, and without the hyphen that may
-/// end the line.
-fn token_of(raw: RawToken) -> Token {
+/// The token at `raw_index` as it is read: on one line, and without the
+/// hyphen that may end the line.
+fn token_of(raw: RawToken, raw_index: usize) -> Token {
     Token {
         text: raw.text,
+        figure: raw.figure,
         fragments: vec![raw.fragment],
         gap: raw.gap,
+        styles: raw.styles,
+        cell: raw.cell,
+        raw_indices: raw_index..raw_index + 1,
     }
 }

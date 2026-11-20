@@ -6,7 +6,7 @@ use super::audit;
 use super::pairing::{self, PagePair};
 use super::{Connector, Mark, MarkStyle, Redline, Rgb, Sheet, SheetPage, Span, Summary};
 use super::{SummaryEntry, SummaryLine, Target};
-use crate::change::{Area, Change, ChangeSide, Comparison};
+use crate::change::{Area, Change, ChangeSide, Comparison, TextRole};
 use crate::{BySide, Side};
 
 impl Redline {
@@ -89,7 +89,7 @@ impl Planner<'_> {
         }
     }
 
-    /// The page with a mark for every area that a change has on it.
+    /// The page with the marks of every area that a change has on it.
     fn sheet_page(&self, side: Side, page_index: usize) -> SheetPage {
         let name = self.names[side];
         let page_count = self.comparison.flows[side].page_sizes.len();
@@ -98,12 +98,18 @@ impl Planner<'_> {
             let change_side = &change.sides[side];
             let (color, style) = look_of(change, side);
             let on_page = |area: &&Area| area.page_index == page_index;
-            let to_mark = |area: &Area| Mark {
-                bounds: area.bounds,
-                color,
-                style,
+            // A figure gets a border around what marks text too.
+            let styles_of = |area: &Area| match area.is_figure {
+                true => vec![style, MarkStyle::Border],
+                false => vec![style],
             };
-            marks.extend(change_side.areas().iter().filter(on_page).map(to_mark));
+            for area in change_side.areas().iter().filter(on_page) {
+                marks.extend(styles_of(area).into_iter().map(|style| Mark {
+                    bounds: area.bounds,
+                    color,
+                    style,
+                }));
+            }
         }
         SheetPage {
             page_index,
@@ -146,42 +152,44 @@ impl Planner<'_> {
 }
 
 /// How one side of a change is marked: its text is highlighted in the color
-/// of that side, or in that of moved text, and the place where it has none
-/// gets a caret in the color of the other side.
+/// of the part it has in the change, and the place where it has none gets a
+/// caret in the color of the text that the other side has there.
 fn look_of(change: &Change, side: Side) -> (Rgb, MarkStyle) {
-    match &change.sides[side] {
-        ChangeSide::Text { .. } if change.is_move => (Rgb::MOVED, MarkStyle::Highlight),
-        ChangeSide::Text { .. } => (color_of(side), MarkStyle::Highlight),
-        ChangeSide::Absent { .. } => (color_of(side.other()), MarkStyle::Caret),
+    match change.role_of(side) {
+        Some(role) => (color_of(role), MarkStyle::Highlight),
+        None => {
+            let missing = TextRole::of_text_only_on(side.other());
+            (color_of(missing), MarkStyle::Caret)
+        }
     }
 }
 
-/// What the summary says of a change: the text that was removed and the text
-/// that was added, or the text that moved as the new document has it.
 fn summary_lines_of(change: &Change) -> Vec<SummaryLine> {
-    let texts = change.sides.as_ref().map(ChangeSide::text);
-    let line = |sign, color, text: Option<&str>| {
-        Some(SummaryLine {
-            sign,
-            color,
-            text: text?.to_owned(),
+    let lines = change.lines().into_iter();
+    lines
+        .map(|(role, text)| SummaryLine {
+            sign: sign_of(role),
+            color: color_of(role),
+            text,
         })
-    };
-    let lines = match change.is_move {
-        true => [line('⇄', Rgb::MOVED, texts.new), None],
-        false => [
-            line('−', color_of(Side::Old), texts.old),
-            line('+', color_of(Side::New), texts.new),
-        ],
-    };
-    lines.into_iter().flatten().collect()
+        .collect()
 }
 
-/// The color of text that only this side has.
-fn color_of(side: Side) -> Rgb {
-    match side {
-        Side::Old => Rgb::REMOVED,
-        Side::New => Rgb::ADDED,
+fn sign_of(role: TextRole) -> char {
+    match role {
+        TextRole::Removed => '−',
+        TextRole::Added => '+',
+        TextRole::Moved => '⇄',
+        TextRole::Restyled => '≈',
+    }
+}
+
+fn color_of(role: TextRole) -> Rgb {
+    match role {
+        TextRole::Removed => Rgb::REMOVED,
+        TextRole::Added => Rgb::ADDED,
+        TextRole::Moved => Rgb::MOVED,
+        TextRole::Restyled => Rgb::RESTYLED,
     }
 }
 
@@ -222,8 +230,9 @@ mod tests {
     use crate::filter::Filters;
     use crate::geometry::Rect;
     use crate::testing::{
-        CELL_HEIGHT, LINE_PITCH, PARAGRAPH, PageBuilder, REST, cell_bounds, comparison_of_pages,
-        raw_flow_of,
+        CELL_HEIGHT, FIGURE_COLUMN_COUNT, FIGURE_WORDS, LINE_PITCH, PARAGRAPH, PageBuilder, REST,
+        cell_bounds, comparison_of_built_pages, comparison_of_pages, page_with_bold,
+        page_with_figure, raw_flow_of,
     };
 
     /// The redline of two documents, given as the text of each of their pages.
@@ -560,6 +569,56 @@ mod tests {
                 text: PARAGRAPH.to_owned(),
             }]
         );
+    }
+
+    #[test]
+    fn text_in_another_style_is_marked_as_such_on_both_pages() {
+        let comparison =
+            comparison_of_built_pages([page_with_bold("one two")], [page_with_bold("one *two*")]);
+        let names = BySide {
+            old: "old.pdf",
+            new: "new.pdf",
+        };
+        let redline = Redline::of(&comparison, names);
+        let mark = Mark {
+            bounds: cells(4..7),
+            color: Rgb::RESTYLED,
+            style: MarkStyle::Highlight,
+        };
+        let sheet = &redline.sheets[0];
+        assert_eq!(sheet.pages.old.as_ref().unwrap().marks, [mark]);
+        assert_eq!(sheet.pages.new.as_ref().unwrap().marks, [mark]);
+        assert_eq!(
+            entries(&redline)[0].lines,
+            [SummaryLine {
+                sign: '≈',
+                color: Rgb::RESTYLED,
+                text: "weight 400 → 700: two".to_owned(),
+            }]
+        );
+    }
+
+    #[test]
+    fn figure_gets_a_border_around_its_highlight() {
+        let comparison = comparison_of_built_pages(
+            [page_with_figure(|_| {})],
+            [page_with_figure(|figure| figure.content_hash = 1)],
+        );
+        let names = BySide {
+            old: "old.pdf",
+            new: "new.pdf",
+        };
+        let redline = Redline::of(&comparison, names);
+        let mark = |style| Mark {
+            bounds: cell_bounds(1, 0..FIGURE_COLUMN_COUNT),
+            color: Rgb::REMOVED,
+            style,
+        };
+        assert_eq!(
+            redline.sheets[0].pages.old.as_ref().unwrap().marks,
+            [mark(MarkStyle::Highlight), mark(MarkStyle::Border)]
+        );
+        assert_eq!(entries(&redline)[0].lines[0].text, FIGURE_WORDS);
     }
 
     #[test]

@@ -8,12 +8,13 @@ use abpdf::change::{ChangeKind, ChangeSide, Comparison};
 use abpdf::filter::Filters;
 use abpdf::flow::Exclusion;
 use abpdf::profile::Profile;
+use abpdf::redline::MarkStyle;
 use abpdf::{BySide, Side};
 
 use common::page_texts;
 use common::{REVISIONS_CHANGE_COUNT, both, compare, compare_and_redline, corpus, corpus_path};
 
-use ChangeKind::{Deleted, Inserted, Moved, Replaced};
+use ChangeKind::{Deleted, Inserted, Moved, Replaced, Restyled};
 
 const STORAGE_OLD: &str =
     "Store the instrument in its case when it is not in use, in a dry room that is free of dust.";
@@ -21,8 +22,12 @@ const STORAGE_NEW: &str =
     "Store the instrument in its case when it is not in use, in a cool room that is free of dust.";
 const CHECK: &str = "Check the supply voltage at the start of every series of measurements.";
 
-/// What the edits in the source have to be reported as.
-const EDITS: [(ChangeKind, &str, &str); REVISIONS_CHANGE_COUNT] = [
+/// The kind and the two texts of a change.
+type Edit<'a> = (ChangeKind, &'a str, &'a str);
+
+/// What the edits in the source have to be reported as where the revisions
+/// are tagged.
+const EDITS: [Edit<'static>; REVISIONS_CHANGE_COUNT] = [
     (Inserted, "", "Monitoring"),
     (
         Inserted,
@@ -41,6 +46,7 @@ const EDITS: [(ChangeKind, &str, &str); REVISIONS_CHANGE_COUNT] = [
         "",
         "Monitoring The monitoring interface is read only.",
     ),
+    (Restyled, "Warnings", "Warnings"),
     (Deleted, "Notes are set in italic type.", ""),
     // Of the two paragraphs that change places, the shorter one moved.
     (Moved, CHECK, CHECK),
@@ -50,6 +56,12 @@ const EDITS: [(ChangeKind, &str, &str); REVISIONS_CHANGE_COUNT] = [
         "Monitoring interface Figure: The monitoring interface",
     ),
     (Replaced, "250", "300"),
+    (
+        Replaced,
+        "Setting number 12 of the controller",
+        "Threshold of the detector",
+    ),
+    (Replaced, "210", "215"),
     (Inserted, "", "P19 Interval of the monitoring interface 60"),
     (Deleted, ",", ""),
     (Replaced, ".", "!"),
@@ -60,9 +72,56 @@ const EDITS: [(ChangeKind, &str, &str); REVISIONS_CHANGE_COUNT] = [
     (Replaced, "dry", "cool"),
 ];
 
+/// What a change says in the place of the figures of
+/// `tests/corpus/figures.typ`: its image, its chart and the drawing that it
+/// includes as a PDF.
+const SENSOR: &str = "[image, 24 × 16 pixels]";
+const CHART: &str = "[drawing, 5 parts]";
+const INCLUDED_DRAWING: &str = "[drawing, 3 parts]";
+
+/// What the edits in that source have to be reported as where the
+/// revisions are tagged.
+const FIGURE_EDITS: [Edit<'static>; 5] = [
+    (
+        Inserted,
+        "",
+        "The figures of this revision stand lower on the page than those of the first one.",
+    ),
+    (Replaced, SENSOR, SENSOR),
+    (Replaced, CHART, CHART),
+    (Replaced, INCLUDED_DRAWING, INCLUDED_DRAWING),
+    (
+        Inserted,
+        "",
+        "[image, 24 × 16 pixels] Figure 6: The sensor of the second revision",
+    ),
+];
+
+/// What the edits have to be reported as without tags, which leaves the two
+/// cells that change next to each other one change.
+fn edits_without_tags() -> Vec<Edit<'static>> {
+    let mut edits = EDITS.to_vec();
+    let second_cell = edits
+        .iter()
+        .position(|edit| edit.1 == "210")
+        .expect("the edits have the cell");
+    let both_cells = (
+        Replaced,
+        "Setting number 12 of the controller 210",
+        "Threshold of the detector 215",
+    );
+    edits.splice(second_cell - 1..=second_cell, [both_cells]);
+    edits
+}
+
 /// The old and the new revision, with or without tags.
 fn revisions(tagging: &str) -> BySide<Arc<Vec<u8>>> {
     BySide::from_fn(|side| corpus(&format!("revisions-{side}-{tagging}.pdf")))
+}
+
+/// The old and the new revision of the figures, with or without tags.
+fn figures(tagging: &str) -> BySide<Arc<Vec<u8>>> {
+    BySide::from_fn(|side| corpus(&format!("figures-{side}-{tagging}.pdf")))
 }
 
 fn profile() -> Profile {
@@ -73,7 +132,7 @@ fn compare_revisions(tagging: &str, filters: &Filters) -> Comparison {
     compare(revisions(tagging), filters)
 }
 
-fn summaries(comparison: &Comparison) -> Vec<(ChangeKind, &str, &str)> {
+fn summaries(comparison: &Comparison) -> Vec<Edit<'_>> {
     comparison
         .changes
         .iter()
@@ -90,10 +149,34 @@ fn summaries(comparison: &Comparison) -> Vec<(ChangeKind, &str, &str)> {
 
 #[test]
 fn revisions_differ_by_their_edits() {
-    for tagging in ["tagged", "untagged"] {
-        let comparison = compare_revisions(tagging, &profile().filters);
-        assert_eq!(summaries(&comparison), EDITS, "{tagging}");
-    }
+    let tagged = compare_revisions("tagged", &profile().filters);
+    assert_eq!(summaries(&tagged), EDITS);
+    let untagged = compare_revisions("untagged", &profile().filters);
+    assert_eq!(summaries(&untagged), edits_without_tags());
+}
+
+#[test]
+fn figures_differ_by_their_edits() {
+    let tagged = compare(figures("tagged"), &Filters::default());
+    assert_eq!(summaries(&tagged), FIGURE_EDITS);
+    // Without tags nothing keeps the shapes of the chart together.
+    let untagged = compare(figures("untagged"), &Filters::default());
+    let edits = FIGURE_EDITS.into_iter();
+    let without_chart: Vec<Edit> = edits.filter(|edit| edit.1 != CHART).collect();
+    assert_eq!(summaries(&untagged), without_chart);
+}
+
+#[test]
+fn figure_that_changes_gets_a_border_on_both_pages() {
+    let (_, redline, _) = compare_and_redline(figures("tagged"), &Filters::default());
+    let border_count = |side: Side| {
+        let page = redline.sheets[0].pages[side].as_ref().expect("a page");
+        let marks = page.marks.iter();
+        marks.filter(|mark| mark.style == MarkStyle::Border).count()
+    };
+    // Three figures change, and the new revision has one more.
+    assert_eq!(border_count(Side::Old), 3);
+    assert_eq!(border_count(Side::New), 4);
 }
 
 #[test]
@@ -122,8 +205,10 @@ fn numbers_that_follow_from_the_edits_are_reported_without_a_profile() {
 #[test]
 fn document_does_not_differ_from_itself() {
     for tagging in ["tagged", "untagged"] {
-        let comparison = compare(both(revisions(tagging).new), &Filters::default());
-        assert_eq!(comparison.changes, []);
+        for pdfs in [revisions(tagging), figures(tagging)] {
+            let comparison = compare(both(pdfs.new), &Filters::default());
+            assert_eq!(comparison.changes, [], "{tagging}");
+        }
     }
 }
 
@@ -158,10 +243,8 @@ fn redline_lists_the_changes_and_shows_their_pages() {
     assert_eq!(pages.len(), 1 + redline.sheets.len());
 
     let summary = &pages[0];
-    assert!(
-        summary.starts_with("old.pdf → new.pdf 14 changes on 5 sheets"),
-        "{summary}"
-    );
+    let counts = format!("old.pdf → new.pdf {REVISIONS_CHANGE_COUNT} changes on 5 sheets");
+    assert!(summary.starts_with(&counts), "{summary}");
     assert!(
         summary.contains("shall be calibrated annually"),
         "{summary}"

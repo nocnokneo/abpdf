@@ -115,7 +115,11 @@ pub struct Mark {
 pub enum MarkStyle {
     /// Tints what is under it, as a highlighter pen does.
     Highlight,
+    /// A thin line around text.
     Outline,
+    /// A thick line around a figure, which shows on a picture where a tint
+    /// is hard to see.
+    Border,
     /// A line down the left edge, to mark a place between two characters.
     Caret,
 }
@@ -149,6 +153,7 @@ impl Rgb {
     pub const REMOVED: Rgb = Rgb::new(217, 38, 38);
     pub const ADDED: Rgb = Rgb::new(26, 153, 51);
     pub const MOVED: Rgb = Rgb::new(38, 89, 217);
+    pub const RESTYLED: Rgb = Rgb::new(204, 122, 0);
 
     pub const fn new(red: u8, green: u8, blue: u8) -> Self {
         Self { red, green, blue }

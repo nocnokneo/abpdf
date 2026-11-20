@@ -45,6 +45,13 @@ run = [
   "typst compile --input revision=new tests/corpus/revisions.typ tests/corpus/revisions-new-tagged.pdf",
   "typst compile --no-pdf-tags --input revision=old tests/corpus/revisions.typ tests/corpus/revisions-old-untagged.pdf",
   "typst compile --no-pdf-tags --input revision=new tests/corpus/revisions.typ tests/corpus/revisions-new-untagged.pdf",
+  # The drawings come first: figures.typ includes them.
+  "typst compile --input revision=old tests/corpus/drawing.typ tests/corpus/drawing-old.pdf",
+  "typst compile --input revision=new tests/corpus/drawing.typ tests/corpus/drawing-new.pdf",
+  "typst compile --input revision=old tests/corpus/figures.typ tests/corpus/figures-old-tagged.pdf",
+  "typst compile --input revision=new tests/corpus/figures.typ tests/corpus/figures-new-tagged.pdf",
+  "typst compile --no-pdf-tags --input revision=old tests/corpus/figures.typ tests/corpus/figures-old-untagged.pdf",
+  "typst compile --no-pdf-tags --input revision=new tests/corpus/figures.typ tests/corpus/figures-new-untagged.pdf",
 ]
 
 [tasks.manual]

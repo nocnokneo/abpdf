@@ -1,9 +1,11 @@
 //! What each document has at a place where they differ.
 
+use std::ops::Range;
+
 use super::moves::Move;
 use super::sequence::Sequence;
 use crate::BySide;
-use crate::change::{Area, Change, ChangeSide};
+use crate::change::{Area, Change, ChangeSide, Difference, StyleDifference};
 use crate::diff::Hunk;
 use crate::flow::{Gap, Token};
 use crate::geometry::Rect;
@@ -28,12 +30,12 @@ pub(super) fn change_at(
         }
         tokens => ChangeSide::Text {
             text: text_of(tokens),
-            areas: areas_of(sequences[side].indexed_tokens(hunk[side].clone())),
+            areas: areas_of(tokens.iter().copied()),
         },
     });
     Change {
         sides,
-        is_move: false,
+        difference: Difference::Text,
     }
 }
 
@@ -52,42 +54,69 @@ pub(super) fn moved(moved: &Move, sequences: &BySide<Sequence>) -> Change {
                 .iter()
                 .any(|hunk| hunk[side].contains(&index))
         };
-        let tokens = sequences[side].indexed_tokens(positions.clone());
+        let tokens = &sequences[side].tokens;
+        let same = positions.clone().filter(|index| !differs(*index));
         ChangeSide::Text {
-            text: text_of(&sequences[side].tokens[positions]),
-            areas: areas_of(tokens.filter(|(index, _)| !differs(*index))),
+            text: text_of(&tokens[positions.clone()]),
+            areas: areas_of(same.map(|index| tokens[index])),
         }
     });
     Change {
         sides,
-        is_move: true,
+        difference: Difference::Place,
     }
 }
 
+/// The change that text in another style is: the text at `positions` of the
+/// sequences, which have the same text there.
+pub(super) fn restyled(
+    positions: &BySide<Range<usize>>,
+    sequences: &BySide<Sequence>,
+    differences: Vec<StyleDifference>,
+) -> Change {
+    let sides = BySide::from_fn(|side| {
+        let tokens = &sequences[side].tokens[positions[side].clone()];
+        ChangeSide::Text {
+            text: text_of(tokens),
+            areas: areas_of(tokens.iter().copied()),
+        }
+    });
+    Change {
+        sides,
+        difference: Difference::Style(differences),
+    }
+}
+
+/// The tokens in words: their texts with the white space between them, and
+/// in the place of each figure what it is.
 fn text_of(tokens: &[&Token]) -> String {
     let mut text = String::new();
     for (index, token) in tokens.iter().enumerate() {
         if index > 0 && token.gap != Gap::None {
             text.push(' ');
         }
-        text.push_str(&token.text);
+        match &token.figure {
+            Some(figure) => text.push_str(&format!("[{}]", figure.kind)),
+            None => text.push_str(&token.text),
+        }
     }
     text
 }
 
-/// The bounds of tokens, each given with its index in the flow, merged per
-/// line.
-/// Tokens that other tokens of the flow stand between are not merged, so
-/// that an area does not cover those.
-fn areas_of<'a>(tokens: impl IntoIterator<Item = (usize, &'a Token)>) -> Vec<Area> {
+/// The bounds of tokens: those of text merged per line, and those of each
+/// figure.
+/// Tokens that other tokens of the document stand between are not merged,
+/// so that an area does not cover those: neither text that belongs to
+/// another change nor text that is left out of the comparison.
+fn areas_of<'a>(tokens: impl IntoIterator<Item = &'a Token>) -> Vec<Area> {
     let mut areas: Vec<Area> = Vec::new();
-    // The index and the line of the fragment before.
-    let mut last = None;
-    for (index, token) in tokens {
+    // The token and the line of the fragment before.
+    let mut last: Option<(&Token, (usize, usize))> = None;
+    for token in tokens {
         for fragment in &token.fragments {
             let line = (fragment.page_index, fragment.line_index);
-            let continues_last = last.is_some_and(|(last_index, last_line)| {
-                last_line == line && index <= last_index + 1
+            let continues_last = last.is_some_and(|(last_token, last_line)| {
+                last_line == line && token.follows(last_token)
             });
             match areas.last_mut() {
                 Some(area) if continues_last => {
@@ -96,9 +125,10 @@ fn areas_of<'a>(tokens: impl IntoIterator<Item = (usize, &'a Token)>) -> Vec<Are
                 _ => areas.push(Area {
                     page_index: fragment.page_index,
                     bounds: fragment.bounds,
+                    is_figure: token.figure.is_some(),
                 }),
             }
-            last = Some((index, line));
+            last = Some((token, line));
         }
     }
     areas
@@ -119,6 +149,7 @@ fn insertion_point(
     let after_previous = previous.map(|token| {
         let fragment = token.fragments.last().expect("a token has a fragment");
         Area {
+            is_figure: false,
             page_index: fragment.page_index,
             bounds: Rect {
                 left: fragment.bounds.right,
@@ -129,6 +160,7 @@ fn insertion_point(
     let before_next = sequence.tokens.get(position).map(|token| {
         let fragment = token.fragments[0];
         Area {
+            is_figure: false,
             page_index: fragment.page_index,
             bounds: Rect {
                 right: fragment.bounds.left,

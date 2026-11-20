@@ -218,8 +218,8 @@ fn counts_line(change_count: usize, sheet_count: usize) -> String {
         0 => "No differences".to_owned(),
         _ => format!(
             "{change_count} change{} on {sheet_count} sheet{}. \
-             Removed text is red on the left, added text is green on the right, \
-             and moved text is blue on both sides.",
+             Removed text is red on the left and added text is green on the right. \
+             On both sides, moved text is blue and text in another style is orange.",
             plural(change_count),
             plural(sheet_count),
         ),

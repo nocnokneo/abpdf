@@ -71,7 +71,8 @@ See @maintenance #page-of(<maintenance>) for the procedure.
 
 == Conventions
 
-Warnings are set in bold type.
+// EDIT: a word becomes bold, and its text stays as it is.
+#edit([Warnings], [*Warnings*]) are set in bold type.
 // EDIT: a sentence is removed.
 #edit([Notes are set in italic type.], [])
 Dimensions are in millimeters unless stated otherwise.
@@ -107,12 +108,20 @@ Dimensions are in millimeters unless stated otherwise.
     columns: (auto, 1fr, auto),
     table.header([Parameter], [Meaning], [Default]),
     ..range(18)
-      .map(row => (
-        [P#(row + 1)],
-        [Setting number #(row + 1) of the controller],
-        // EDIT: one value of the table changes.
-        [#if row == 4 { edit(250, 300) } else { 100 + row * 10 }],
-      ))
+      .map(row => {
+        let number = row + 1
+        // EDIT: two cells that are next to each other change, which is a
+        // change of each cell where tags tell the cells apart.
+        let is-threshold = number == 12
+        (
+          [P#number],
+          if is-threshold {
+            edit[Setting number 12 of the controller][Threshold of the detector]
+          } else [Setting number #number of the controller],
+          // EDIT: one value of the table changes.
+          [#if number == 5 { edit(250, 300) } else if is-threshold { edit(210, 215) } else { 100 + row * 10 }],
+        )
+      })
       .flatten(),
     // EDIT: a row is added to the table.
     ..if is-new { ([P19], [Interval of the monitoring interface], [60]) },

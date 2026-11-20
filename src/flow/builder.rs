@@ -5,9 +5,10 @@ use std::mem;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::hyphen_marks::{self, HyphenMarks};
-use super::{Fragment, Gap, HyphenKind, LineEndHyphen, RawFlow, RawToken};
+use super::{Cell, FIGURE_TEXT, Figure, Fragment, Gap, HyphenKind, LineEndHyphen};
+use super::{RawFlow, RawToken};
 use crate::geometry::{Rect, Size};
-use crate::reader::{Char, Page, TextItem};
+use crate::reader::{self, Char, Page, Style, TextItem};
 
 const SOFT_HYPHEN: char = '\u{AD}';
 
@@ -20,6 +21,7 @@ const INVISIBLE_CHARACTERS: [char; 3] = ['\u{200B}', '\u{2060}', '\u{FEFF}'];
 pub struct FlowBuilder {
     tokens: Vec<RawToken>,
     page_sizes: Vec<Size>,
+    styles: Vec<Style>,
     hyphen_marks: HyphenMarks,
 }
 
@@ -28,7 +30,9 @@ impl FlowBuilder {
     pub fn add_page(&mut self, page: &Page) {
         let page_index = self.page_sizes.len();
         self.page_sizes.push(page.size);
+        let span_styles = page.spans.iter().map(|span| self.style_index(&span.style));
         PageTokenizer {
+            span_styles: span_styles.collect(),
             builder: self,
             page,
             page_index,
@@ -45,7 +49,17 @@ impl FlowBuilder {
         RawFlow {
             tokens: self.tokens,
             page_sizes: self.page_sizes,
+            styles: self.styles,
         }
+    }
+
+    /// The index of a style among the styles of the document.
+    fn style_index(&mut self, style: &Style) -> usize {
+        let known = self.styles.iter().position(|known| known == style);
+        known.unwrap_or_else(|| {
+            self.styles.push(style.clone());
+            self.styles.len() - 1
+        })
     }
 }
 
@@ -59,6 +73,9 @@ struct RunEndHyphen {
 struct PageTokenizer<'a> {
     builder: &'a mut FlowBuilder,
     page: &'a Page,
+    /// The index among the styles of the document of the style of each span
+    /// of the page.
+    span_styles: Vec<usize>,
     page_index: usize,
     line_index: usize,
     /// The white space since the last token.
@@ -83,6 +100,7 @@ impl PageTokenizer<'_> {
                     self.gap = Gap::LineBreak;
                     self.line_index += 1;
                 }
+                TextItem::Figure(index) => self.add_figure(&self.page.figures[*index]),
             }
         }
         self.end_run(None);
@@ -120,6 +138,26 @@ impl PageTokenizer<'_> {
         self.run.push(*character);
     }
 
+    /// Makes a figure a token, on a line of its own.
+    fn add_figure(&mut self, figure: &reader::Figure) {
+        self.end_run(None);
+        if self.gap != Gap::LineBreak {
+            self.line_index += 1;
+        }
+        self.builder.tokens.push(RawToken {
+            text: FIGURE_TEXT.to_owned(),
+            figure: Some(Figure::of(figure)),
+            fragment: self.fragment(figure.bounds),
+            gap: Gap::LineBreak,
+            styles: Vec::new(),
+            is_artifact: figure.is_artifact,
+            cell: None,
+            line_end_hyphen: None,
+        });
+        self.gap = Gap::LineBreak;
+        self.line_index += 1;
+    }
+
     /// Turns the run into tokens.
     fn end_run(&mut self, hyphen: Option<RunEndHyphen>) {
         let hyphen = hyphen.or_else(|| {
@@ -147,17 +185,28 @@ impl PageTokenizer<'_> {
     }
 
     fn push_token(&mut self, text: &str, characters: &[Char]) {
-        let first = &characters[0];
+        let first_span = &self.page.spans[characters[0].span];
         let bounds = characters
             .iter()
             .map(|character| character.bounds)
             .reduce(|bounds, next| bounds.union(&next))
             .expect("a token has characters");
+        let mut styles: Vec<usize> = characters
+            .iter()
+            .map(|character| self.span_styles[character.span])
+            .collect();
+        styles.dedup();
         self.builder.tokens.push(RawToken {
             text: text.to_owned(),
+            figure: None,
             fragment: self.fragment(bounds),
             gap: mem::replace(&mut self.gap, Gap::None),
-            is_artifact: self.page.spans[first.span].is_artifact,
+            styles,
+            is_artifact: first_span.is_artifact,
+            cell: first_span.cell.map(|index| Cell {
+                page_index: self.page_index,
+                index,
+            }),
             line_end_hyphen: None,
         });
     }

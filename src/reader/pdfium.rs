@@ -1,7 +1,10 @@
 //! A [`Reader`] backed by PDFium.
 
+mod figures;
 mod handles;
 mod library;
+mod matrix;
+mod objects;
 mod page_space;
 mod strings;
 mod structure;
@@ -16,6 +19,7 @@ use pdfium_render::prelude::FPDF_DOCUMENT;
 use self::handles::LoadedPage;
 pub use self::library::LIBRARY_PATH_VARIABLE;
 use self::library::LoadedLibrary;
+use self::objects::PageObjects;
 use self::page_space::PageSpace;
 use super::{Page, ReadError, Reader};
 
@@ -73,15 +77,19 @@ impl Reader for PdfiumReader {
             page_number: page_index + 1,
         })?;
         let page_space = PageSpace::new(page.visible_box(), page.clockwise_quarter_turns());
-        let structure_paths = if self.is_tagged {
-            structure::paths_by_marked_content_id(&page)
+        let structures = if self.is_tagged {
+            structure::by_marked_content_id(&page)
         } else {
             HashMap::new()
         };
-        let (spans, text) = text::read(&page, &page_space, &structure_paths);
+        let objects = PageObjects::of(&page);
+        let figures = figures::read(&objects, &page_space, &structures);
+        let figure_objects: Vec<usize> = figures.iter().map(|found| found.first_object).collect();
+        let (spans, text) = text::read(&page, &page_space, &structures, &objects, &figure_objects);
         Ok(Page {
             size: page_space.size(),
             spans,
+            figures: figures.into_iter().map(|found| found.figure).collect(),
             text,
         })
     }

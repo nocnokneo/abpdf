@@ -40,11 +40,11 @@ pub fn diff(keys: &BySide<Vec<&str>>) -> Vec<Hunk> {
 /// which match one to one.
 pub type Match = BySide<Range<usize>>;
 
-/// The runs that the hunks of a diff leave between them in sequences of
-/// these lengths, in order.
-pub(crate) fn matches(hunks: &[Hunk], lengths: BySide<usize>) -> Vec<Match> {
-    let end = lengths.map(|length| length..length);
-    let mut start = BySide { old: 0, new: 0 };
+/// The runs that `hunks` leave between them in the ranges `within` of two
+/// sequences, in order.
+pub(crate) fn matches(hunks: &[Hunk], within: &BySide<Range<usize>>) -> Vec<Match> {
+    let end = within.as_ref().map(|range| range.end..range.end);
+    let mut start = within.as_ref().map(|range| range.start);
     let mut matches = Vec::new();
     for hunk in hunks.iter().chain(iter::once(&end)) {
         if hunk.old.start > start.old {
@@ -53,19 +53,6 @@ pub(crate) fn matches(hunks: &[Hunk], lengths: BySide<usize>) -> Vec<Match> {
         start = hunk.as_ref().map(|range| range.end);
     }
     matches
-}
-
-/// The indices below `len` that are in none of `ranges`, which ascend.
-pub(crate) fn indices_outside(
-    len: usize,
-    ranges: &[Range<usize>],
-) -> impl Iterator<Item = usize> + '_ {
-    let starts = iter::once(0).chain(ranges.iter().map(|range| range.end));
-    let ends = ranges
-        .iter()
-        .map(|range| range.start)
-        .chain(iter::once(len));
-    starts.zip(ends).flat_map(|(start, end)| start..end)
 }
 
 /// Merges neighboring hunks if the match between them is small next to them.
@@ -151,19 +138,15 @@ mod tests {
     #[test]
     fn matches_are_what_the_hunks_leave_between_them() {
         let hunks = [hunk(0..1, 0..0), hunk(3..4, 2..5)];
-        let lengths = BySide { old: 6, new: 7 };
+        let within = BySide {
+            old: 0..6,
+            new: 0..7,
+        };
         assert_eq!(
-            matches(&hunks, lengths),
+            matches(&hunks, &within),
             [hunk(1..3, 0..2), hunk(4..6, 5..7)]
         );
-        assert_eq!(matches(&[], lengths.map(|_| 2)), [hunk(0..2, 0..2)]);
-    }
-
-    #[test]
-    fn indices_outside_ranges_skip_what_is_in_them() {
-        let outside = |ranges: &[Range<usize>]| indices_outside(6, ranges).collect::<Vec<_>>();
-        assert_eq!(outside(&[]), [0, 1, 2, 3, 4, 5]);
-        assert_eq!(outside(&[0..2, 3..3, 4..6]), [2, 3]);
+        assert_eq!(matches(&[], &within.map(|_| 2..4)), [hunk(2..4, 2..4)]);
     }
 
     #[test]
