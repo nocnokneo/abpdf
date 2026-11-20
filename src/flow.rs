@@ -1,8 +1,12 @@
 //! The text of a document as one flow of tokens, across page boundaries.
+//!
+//! A [`RawFlow`] is the text as it is read.
+//! [`prepare`] makes of it the [`Flow`] that is compared.
 
 mod builder;
 mod hyphen_marks;
 mod join;
+mod repeats;
 #[cfg(test)]
 mod tests;
 
@@ -10,6 +14,7 @@ use std::borrow::Cow;
 
 use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfkc_quick};
 
+use crate::BySide;
 use crate::filter::Filters;
 use crate::geometry::{Rect, Size};
 use crate::reader::{ReadError, Reader};
@@ -17,43 +22,80 @@ use crate::reader::{ReadError, Reader};
 pub use self::builder::FlowBuilder;
 use self::join::Vocabulary;
 
-/// Gets flows as [`Flow::read`] returns them ready to be compared with each
-/// other.
+/// Gets two documents ready to be compared with each other.
 ///
-/// First the filters decide which tokens take part in the comparison.
+/// First it is decided which tokens take part in the comparison: the filters
+/// leave tokens out, and then what the pages repeat at their tops is left
+/// out, which the filters have to uncover where a header stands above it.
 /// Then the words that a line break splits are rejoined, which has to come
-/// second: a word joins the next token that takes part, and the words of all
-/// the flows together tell what a hyphen is where the producer does not.
-pub fn prepare<const N: usize>(mut flows: [Flow; N], filters: &Filters) -> [Flow; N] {
-    for flow in &mut flows {
-        filters.apply(flow);
-    }
-    let vocabulary = Vocabulary::of(&flows);
-    for flow in &mut flows {
-        flow.join_broken_words(&vocabulary);
-    }
-    flows
+/// last: a word joins the next token that takes part, and the words of both
+/// documents together tell what a hyphen is where the producer does not.
+pub fn prepare(flows: BySide<RawFlow>, filters: &Filters) -> BySide<Flow> {
+    let mut screened = flows.map(|flow| Screened {
+        exclusions: filters.exclusions(&flow),
+        flow,
+    });
+    repeats::exclude(&mut screened);
+    let vocabulary = Vocabulary::of(&screened);
+    screened.map(|screened| join::join(screened, &vocabulary))
 }
 
-/// The tokens of a document in reading order.
+/// A flow as it is read, with the rule that leaves each of its tokens out of
+/// the comparison, if one does.
+struct Screened {
+    flow: RawFlow,
+    exclusions: Vec<Option<Exclusion>>,
+}
+
+impl Screened {
+    /// The tokens that take part in the comparison, each with its index in
+    /// the flow.
+    fn compared(&self) -> impl Iterator<Item = (usize, &RawToken)> {
+        let tokens = self.flow.tokens.iter().enumerate();
+        tokens.filter(|(index, _)| self.exclusions[*index].is_none())
+    }
+}
+
+/// The tokens of a document in reading order, as they are read.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Flow {
-    pub tokens: Vec<Token>,
+pub struct RawFlow {
+    pub tokens: Vec<RawToken>,
     pub page_sizes: Vec<Size>,
 }
 
-impl Flow {
+impl RawFlow {
     /// Reads every page of a document.
-    ///
-    /// Words that a line break splits are still in two tokens, and no token
-    /// is left out of the comparison yet: [`prepare`] does both.
-    pub fn read(reader: &dyn Reader) -> Result<Flow, ReadError> {
+    pub fn read(reader: &dyn Reader) -> Result<RawFlow, ReadError> {
         let mut builder = FlowBuilder::default();
         for page_index in 0..reader.page_count() {
             builder.add_page(&reader.read_page(page_index)?);
         }
         Ok(builder.finish())
     }
+}
+
+/// A word or a punctuation mark on one line.
+/// A word that a line break splits is two of these.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RawToken {
+    pub text: String,
+    /// Where the token is drawn.
+    pub fragment: Fragment,
+    /// The white space before the token.
+    pub gap: Gap,
+    /// Whether the producer marked the token as an artifact.
+    pub is_artifact: bool,
+    /// The hyphen that ends a line right after the token.
+    pub line_end_hyphen: Option<LineEndHyphen>,
+}
+
+/// The tokens of a document that are compared, in reading order.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Flow {
+    pub tokens: Vec<Token>,
+    /// The tokens that are left out of the comparison.
+    pub excluded: Vec<ExcludedToken>,
+    pub page_sizes: Vec<Size>,
 }
 
 /// A word or a punctuation mark.
@@ -65,33 +107,34 @@ pub struct Token {
     pub fragments: Vec<Fragment>,
     /// The white space before the token.
     pub gap: Gap,
-    /// Whether the producer marked the token as an artifact.
-    pub is_artifact: bool,
-    /// Why the token is left out of the comparison, if it is.
-    /// [`prepare`] decides.
-    pub exclusion: Option<Exclusion>,
-    /// The hyphen that ends a line right after the token, until [`prepare`]
-    /// has dealt with it.
-    pub line_end_hyphen: Option<LineEndHyphen>,
 }
 
 impl Token {
     /// The form of the text that is compared: compatibility characters such as
     /// ligatures are folded into their plain equivalents.
     pub fn key(&self) -> Cow<'_, str> {
-        match is_nfkc_quick(self.text.chars()) {
-            IsNormalized::Yes => Cow::Borrowed(&self.text),
-            _ => Cow::Owned(self.text.nfkc().collect()),
-        }
+        key_of(&self.text)
     }
+}
 
-    pub fn is_word(&self) -> bool {
-        self.text.chars().next().is_some_and(char::is_alphanumeric)
+fn key_of(text: &str) -> Cow<'_, str> {
+    match is_nfkc_quick(text.chars()) {
+        IsNormalized::Yes => Cow::Borrowed(text),
+        _ => Cow::Owned(text.nfkc().collect()),
     }
+}
 
-    pub fn is_excluded(&self) -> bool {
-        self.exclusion.is_some()
-    }
+/// Whether the text of a token is a word, and not a punctuation mark.
+fn is_word(text: &str) -> bool {
+    text.chars().next().is_some_and(char::is_alphanumeric)
+}
+
+/// A token that is left out of the comparison.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExcludedToken {
+    pub token: Token,
+    /// The rule that leaves the token out.
+    pub exclusion: Exclusion,
 }
 
 /// The part of a token on one line.
@@ -112,7 +155,7 @@ pub enum Gap {
 }
 
 /// The rule that leaves a token out of the comparison.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Exclusion {
     /// The producer marked the token as an artifact.
     Artifact,
@@ -122,6 +165,9 @@ pub enum Exclusion {
     Footer,
     /// The ignore pattern with this index matched the token.
     Pattern(usize),
+    /// The token repeats, at the top of its page, text of the page before,
+    /// and the other document has no text for it.
+    Repeat,
 }
 
 /// A hyphen that ends a line in the middle of a word.

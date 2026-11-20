@@ -5,13 +5,19 @@ use std::ops::Range;
 use crate::BySide;
 use crate::change::Comparison;
 use crate::filter::Filters;
-use crate::flow::{Flow, FlowBuilder};
+use crate::flow::{Flow, FlowBuilder, RawFlow};
 use crate::geometry::{Rect, Size};
 use crate::reader::{Char, Color, Page, Span, Style, TextItem};
 
 pub(crate) const CELL_WIDTH: f32 = 10.0;
 pub(crate) const CELL_HEIGHT: f32 = 12.0;
 pub(crate) const LINE_PITCH: f32 = 20.0;
+
+/// A paragraph of six tokens, for tests in which text moves.
+pub(crate) const PARAGRAPH: &str = "this paragraph stands somewhere else now";
+/// Ten tokens, so more than the paragraph, which a diff therefore takes for
+/// the text that stays in place where the two change places.
+pub(crate) const REST: &str = "all the other text of the document stays in place";
 
 /// Builds a page on which every character takes one cell of a grid.
 pub(crate) struct PageBuilder {
@@ -138,7 +144,7 @@ fn body_span() -> Span {
 
 /// The flow of a document with these pages, before any token is excluded or
 /// joined.
-pub(crate) fn raw_flow_of(pages: impl IntoIterator<Item = PageBuilder>) -> Flow {
+pub(crate) fn raw_flow_of(pages: impl IntoIterator<Item = PageBuilder>) -> RawFlow {
     let mut builder = FlowBuilder::default();
     for page in pages {
         builder.add_page(&page.build());
@@ -157,7 +163,7 @@ pub(crate) fn comparison_of_pages(
     old_pages: &[impl AsRef<str>],
     new_pages: &[impl AsRef<str>],
 ) -> Comparison {
-    fn flow(pages: &[impl AsRef<str>]) -> Flow {
+    fn flow(pages: &[impl AsRef<str>]) -> RawFlow {
         raw_flow_of(
             pages
                 .iter()
@@ -189,7 +195,9 @@ pub(crate) fn texts(flow: &Flow) -> Vec<&str> {
         .collect()
 }
 
-pub(crate) fn compared_texts(flow: &Flow) -> Vec<&str> {
-    let compared = flow.tokens.iter().filter(|token| !token.is_excluded());
-    compared.map(|token| token.text.as_str()).collect()
+pub(crate) fn excluded_texts(flow: &Flow) -> Vec<&str> {
+    let tokens = flow.excluded.iter();
+    tokens
+        .map(|excluded| excluded.token.text.as_str())
+        .collect()
 }

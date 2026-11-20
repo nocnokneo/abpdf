@@ -40,6 +40,14 @@ impl Rect {
             .reduce(|bounds, point| bounds.union(&point))
     }
 
+    /// Whether the two rectangles share more than an edge.
+    pub fn intersects(&self, other: &Rect) -> bool {
+        self.left < other.right
+            && other.left < self.right
+            && self.top < other.bottom
+            && other.top < self.bottom
+    }
+
     pub fn width(&self) -> f32 {
         self.right - self.left
     }
@@ -81,5 +89,18 @@ mod tests {
     #[test]
     fn bounding_of_nothing_is_none() {
         assert_eq!(Rect::bounding([]), None);
+    }
+
+    #[test]
+    fn rectangles_that_only_touch_do_not_intersect() {
+        let rect = |left: f32, top: f32| Rect {
+            left,
+            top,
+            right: left + 10.0,
+            bottom: top + 10.0,
+        };
+        assert!(rect(0.0, 0.0).intersects(&rect(5.0, 5.0)));
+        assert!(!rect(0.0, 0.0).intersects(&rect(10.0, 0.0)));
+        assert!(!rect(0.0, 0.0).intersects(&rect(0.0, 10.0)));
     }
 }

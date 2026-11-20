@@ -4,10 +4,16 @@
 //!
 //! A [`Redline`] describes the document as plain data.
 //! [`Redline::of`] plans it for a comparison, and [`write()`] renders it.
+//! [`Redline::audit_of`] plans one that also shows what the comparison left
+//! out.
 //! The source pages are embedded as they are, so their text stays text and
 //! their drawings stay vector drawings.
 
+mod audit;
+mod connector;
 mod layout;
+mod paint;
+mod pairing;
 mod plan;
 mod render;
 mod summary;
@@ -32,7 +38,17 @@ pub struct Redline {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Summary {
     pub title: String,
+    /// What the colors of the outlines on the sheets stand for, in a redline
+    /// that outlines what was left out of the comparison.
+    pub legend: Vec<LegendEntry>,
     pub entries: Vec<SummaryEntry>,
+}
+
+/// What text was left out for that is outlined in a color.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LegendEntry {
+    pub color: Rgb,
+    pub text: String,
 }
 
 /// One change in the summary.
@@ -40,10 +56,19 @@ pub struct Summary {
 pub struct SummaryEntry {
     /// Where the change is in the documents, for a reader.
     pub location: String,
-    /// The text that each document has at the change, if it has any.
-    pub texts: BySide<Option<String>>,
+    /// The texts of the change.
+    pub lines: Vec<SummaryLine>,
     /// Where the sheets show the change, which the entry links to.
     pub target: Target,
+}
+
+/// One text of a change in the summary.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SummaryLine {
+    /// What happened to the text, such as `+` for text that was added.
+    pub sign: char,
+    pub color: Rgb,
+    pub text: String,
 }
 
 /// A place on a sheet.
@@ -101,7 +126,9 @@ pub struct Connector {
     /// Written in the middle of the band.
     pub label: String,
     /// The extent of the change on the page of each side.
-    pub spans: BySide<Span>,
+    /// The band ends in the gutter on a side without one, which is where the
+    /// sheet does not show that side of the change.
+    pub spans: BySide<Option<Span>>,
 }
 
 /// A vertical extent on a page, in distances from its top edge.
@@ -122,7 +149,6 @@ impl Rgb {
     pub const REMOVED: Rgb = Rgb::new(217, 38, 38);
     pub const ADDED: Rgb = Rgb::new(26, 153, 51);
     pub const MOVED: Rgb = Rgb::new(38, 89, 217);
-    pub const EXCLUDED: Rgb = Rgb::new(128, 128, 128);
 
     pub const fn new(red: u8, green: u8, blue: u8) -> Self {
         Self { red, green, blue }

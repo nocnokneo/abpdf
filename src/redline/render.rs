@@ -1,23 +1,22 @@
 //! Drawing a [`Redline`] with krilla.
 
 use krilla::blend::BlendMode;
-use krilla::color::rgb;
 use krilla::configure::{ConfigurationBuilder, PdfVersion};
 use krilla::destination::XyzDestination;
 use krilla::error::KrillaError;
 use krilla::geom::{PathBuilder, Point, Transform};
 use krilla::metadata::Metadata;
-use krilla::num::NormalizedF32;
 use krilla::outline::{Outline, OutlineNode};
 use krilla::page::PageSettings;
-use krilla::paint::{Fill, Stroke};
 use krilla::surface::Surface;
 use krilla::{Document, SerializeSettings};
 
 use super::Target;
+use super::connector;
+use super::paint::{OUTLINE_LINE_WIDTH, fill, path_of_rects, stroke, stroke_rects};
 use super::summary::{self, SummaryPages};
 use super::text::TextFont;
-use super::{Connector, Mark, MarkStyle, Redline, Rgb, Sheet, SheetLayout, SheetPage, Source};
+use super::{Mark, MarkStyle, Redline, Rgb, Sheet, SheetLayout, SheetPage, Source};
 use crate::geometry::Rect;
 use crate::{BySide, Side};
 
@@ -27,19 +26,11 @@ const NOTE_FONT_SIZE: f32 = 8.0;
 const NOTE_COLOR: Rgb = Rgb::new(115, 115, 115);
 const FRAME_COLOR: Rgb = Rgb::new(153, 153, 153);
 const FRAME_LINE_WIDTH: f32 = 0.5;
-const OUTLINE_LINE_WIDTH: f32 = 0.4;
 const CARET_LINE_WIDTH: f32 = 1.2;
 
 /// How much of a mark's color a highlight keeps: the rest is white, so that
 /// the text under it stays readable.
 const HIGHLIGHT_STRENGTH: f32 = 0.3;
-
-const CONNECTOR_COLOR: Rgb = Rgb::new(140, 89, 204);
-const CONNECTOR_OPACITY: f32 = 0.22;
-const CONNECTOR_LINE_WIDTH: f32 = 0.6;
-/// The space between a connector and the frames it joins.
-const CONNECTOR_INSET: f32 = 3.0;
-const CONNECTOR_LABEL_FONT_SIZE: f32 = 7.0;
 
 /// How far above its target a link shows the sheet from.
 const TARGET_HEADROOM: f32 = 40.0;
@@ -145,9 +136,7 @@ fn draw_sheet(
         }
         stroke_rects(&mut surface, [frame], FRAME_COLOR, FRAME_LINE_WIDTH);
     }
-    for connector in &sheet.connectors {
-        draw_connector(&mut surface, font, layout, connector);
-    }
+    connector::draw_all(&mut surface, font, layout, &sheet.connectors);
     let left = layout.frames.old.left;
     let notes = [
         (&sheet.note_above, layout.note_above_baseline()),
@@ -210,20 +199,6 @@ fn highlight_rects(surface: &mut Surface, rects: impl IntoIterator<Item = Rect>,
     surface.pop();
 }
 
-fn stroke_rects(
-    surface: &mut Surface,
-    rects: impl IntoIterator<Item = Rect>,
-    color: Rgb,
-    line_width: f32,
-) {
-    let Some(path) = path_of_rects(rects) else {
-        return;
-    };
-    surface.set_fill(None);
-    surface.set_stroke(Some(stroke(color, line_width)));
-    surface.draw_path(&path);
-}
-
 fn stroke_left_edges(surface: &mut Surface, rects: impl IntoIterator<Item = Rect>, color: Rgb) {
     let mut builder = PathBuilder::new();
     for rect in rects {
@@ -236,86 +211,6 @@ fn stroke_left_edges(surface: &mut Surface, rects: impl IntoIterator<Item = Rect
     surface.set_fill(None);
     surface.set_stroke(Some(stroke(color, CARET_LINE_WIDTH)));
     surface.draw_path(&path);
-}
-
-/// Draws a band that runs from the old side's extent at the left of the
-/// gutter to the new side's extent at its right, with the label in between.
-fn draw_connector(
-    surface: &mut Surface,
-    font: &TextFont,
-    layout: &SheetLayout,
-    connector: &Connector,
-) {
-    let (gutter_left, gutter_right) = layout.gutter();
-    let (left, right) = (
-        gutter_left + CONNECTOR_INSET,
-        gutter_right - CONNECTOR_INSET,
-    );
-    let middle = (left + right) / 2.0;
-    let old_top = layout.frames.old.top + connector.spans.old.top;
-    let old_bottom = layout.frames.old.top + connector.spans.old.bottom;
-    let new_top = layout.frames.new.top + connector.spans.new.top;
-    let new_bottom = layout.frames.new.top + connector.spans.new.bottom;
-
-    let mut builder = PathBuilder::new();
-    builder.move_to(left, old_top);
-    builder.cubic_to(middle, old_top, middle, new_top, right, new_top);
-    builder.line_to(right, new_bottom);
-    builder.cubic_to(middle, new_bottom, middle, old_bottom, left, old_bottom);
-    builder.close();
-    if let Some(path) = builder.finish() {
-        surface.set_fill(Some(Fill {
-            opacity: NormalizedF32::new(CONNECTOR_OPACITY).expect("an opacity between 0 and 1"),
-            ..fill(CONNECTOR_COLOR)
-        }));
-        surface.set_stroke(Some(stroke(CONNECTOR_COLOR, CONNECTOR_LINE_WIDTH)));
-        surface.draw_path(&path);
-    }
-
-    let label_width = font.width(&connector.label, CONNECTOR_LABEL_FONT_SIZE);
-    let center = (old_top + old_bottom + new_top + new_bottom) / 4.0;
-    let position = (
-        middle - label_width / 2.0,
-        center + CONNECTOR_LABEL_FONT_SIZE / 3.0,
-    );
-    font.draw(
-        surface,
-        position,
-        CONNECTOR_LABEL_FONT_SIZE,
-        LABEL_COLOR,
-        &connector.label,
-    );
-}
-
-fn path_of_rects(rects: impl IntoIterator<Item = Rect>) -> Option<krilla::geom::Path> {
-    let mut builder = PathBuilder::new();
-    for rect in rects {
-        let rect = krilla::geom::Rect::from_ltrb(rect.left, rect.top, rect.right, rect.bottom);
-        if let Some(rect) = rect {
-            builder.push_rect(rect);
-        }
-    }
-    builder.finish()
-}
-
-pub(super) fn fill(color: Rgb) -> Fill {
-    Fill {
-        paint: krilla_color(color).into(),
-        opacity: NormalizedF32::ONE,
-        rule: Default::default(),
-    }
-}
-
-fn stroke(color: Rgb, line_width: f32) -> Stroke {
-    Stroke {
-        paint: krilla_color(color).into(),
-        width: line_width,
-        ..Stroke::default()
-    }
-}
-
-fn krilla_color(color: Rgb) -> rgb::Color {
-    rgb::Color::new(color.red, color.green, color.blue)
 }
 
 /// Mixes `strength` of the color with white.

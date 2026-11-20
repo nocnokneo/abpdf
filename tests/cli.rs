@@ -5,10 +5,11 @@ mod common;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::Arc;
 
 use serde_json::Value;
 
-use common::corpus_path as corpus;
+use common::{REVISIONS_CHANGE_COUNT, corpus_path as corpus, page_texts};
 
 /// A path for a file that a test writes.
 fn scratch(file_name: &str) -> PathBuf {
@@ -59,7 +60,8 @@ fn different_documents_exit_with_1_and_list_their_changes() {
     let change =
         "@ old p. 1 / new p. 1\n- shall be calibrated annually\n+ must be verified every month\n";
     assert!(listing.contains(change), "{listing}");
-    assert!(listing.ends_with("\n11 changes\n"), "{listing}");
+    let count = format!("\n{REVISIONS_CHANGE_COUNT} changes\n");
+    assert!(listing.ends_with(&count), "{listing}");
     assert_eq!(stderr(&output), "");
 }
 
@@ -72,7 +74,7 @@ fn redline_and_json_are_written_where_asked() {
     assert!(fs::read(&redline).unwrap().starts_with(b"%PDF-"));
     let report: Value = serde_json::from_slice(&fs::read(&json).unwrap()).unwrap();
     let changes = report["changes"].as_array().unwrap();
-    assert_eq!(changes.len(), 11);
+    assert_eq!(changes.len(), REVISIONS_CHANGE_COUNT);
     assert_eq!(changes[2]["kind"], "replaced");
     assert_eq!(changes[2]["new"]["text"], "must be verified every month");
     assert_eq!(changes[2]["new"]["areas"][0]["page"], 1);
@@ -126,6 +128,35 @@ fn redline_of_different_documents_is_written_either_way() {
 fn leaving_the_redline_out_needs_a_redline_to_leave_out() {
     let pdf = corpus("revisions-old-tagged.pdf");
     let output = abpdf(&[&pdf, &pdf, "--only-if-different".as_ref()]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("--output"), "{}", stderr(&output));
+}
+
+#[test]
+fn audit_shows_every_page_and_says_what_its_outlines_are() {
+    let (redline, audit) = (scratch("cli-no-audit.pdf"), scratch("cli-audit.pdf"));
+    let pdf = corpus("revisions-old-tagged.pdf");
+    abpdf(&[&pdf, &pdf, "--output".as_ref(), &redline]);
+    let output = abpdf(&[&pdf, &pdf, "--output".as_ref(), &audit, "--audit".as_ref()]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+
+    let pages_of = |path: &Path| page_texts(Arc::new(fs::read(path).unwrap()));
+    let (redline_pages, audit_pages) = (pages_of(&redline), pages_of(&audit));
+    // Without changes a redline is its summary, and the audit shows the
+    // three pages of the document after it.
+    assert_eq!(redline_pages.len(), 1);
+    assert_eq!(audit_pages.len(), 1 + 3);
+    assert!(!redline_pages[0].contains("left out of the comparison"));
+    assert!(
+        audit_pages[0].contains("left out of the comparison"),
+        "{}",
+        audit_pages[0]
+    );
+}
+
+#[test]
+fn audit_needs_a_redline_to_show_it_in() {
+    let output = compare_revisions(&["--audit".as_ref()]);
     assert_eq!(output.status.code(), Some(2));
     assert!(stderr(&output).contains("--output"), "{}", stderr(&output));
 }

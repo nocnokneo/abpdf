@@ -49,6 +49,7 @@ fn change_record(change: &Change) -> ChangeRecord<'_> {
             ChangeKind::Inserted => "inserted",
             ChangeKind::Deleted => "deleted",
             ChangeKind::Replaced => "replaced",
+            ChangeKind::Moved => "moved",
         },
         old: side_record(&change.sides.old),
         new: side_record(&change.sides.new),
@@ -83,7 +84,7 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
-    use crate::testing::comparison_of;
+    use crate::testing::{PARAGRAPH, REST, comparison_of};
 
     fn report(old: &str, new: &str) -> Value {
         let mut output = Vec::new();
@@ -113,6 +114,19 @@ mod tests {
             }]
         });
         assert_eq!(report("keep old", "keep newer"), expected);
+    }
+
+    #[test]
+    fn text_that_moved_has_its_areas_in_both_documents() {
+        let old = format!("{PARAGRAPH}\n{REST}");
+        let new = format!("{REST}\n{PARAGRAPH}");
+        let report = report(&old, &new);
+        let change = &report["changes"][0];
+        assert_eq!(change["kind"], "moved");
+        assert_eq!(change["old"]["text"], PARAGRAPH);
+        assert_eq!(change["new"]["text"], PARAGRAPH);
+        assert_eq!(change["old"]["areas"][0]["top"], 0.0);
+        assert_eq!(change["new"]["areas"][0]["top"], 20.0);
     }
 
     #[test]

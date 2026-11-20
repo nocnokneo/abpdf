@@ -9,12 +9,16 @@ use crate::excerpt::shortened;
 const MAX_TEXT_CHARS: usize = 200;
 
 /// Writes each change as the pages it is on, its old text after `-` and its
-/// new text after `+`, and a count at the end.
+/// new text after `+`, or text that moved after `>`, and a count at the end.
 pub fn write(comparison: &Comparison, mut output: impl Write) -> io::Result<()> {
     for change in &comparison.changes {
         writeln!(output, "@ {}", change.location())?;
         let texts = change.sides.as_ref().map(ChangeSide::text);
-        for (sign, text) in [('-', texts.old), ('+', texts.new)] {
+        let lines = match change.is_move {
+            true => vec![('>', texts.new)],
+            false => vec![('-', texts.old), ('+', texts.new)],
+        };
+        for (sign, text) in lines {
             if let Some(text) = text {
                 writeln!(output, "{sign} {}", shortened(text, MAX_TEXT_CHARS))?;
             }
@@ -30,7 +34,7 @@ pub fn write(comparison: &Comparison, mut output: impl Write) -> io::Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::comparison_of;
+    use crate::testing::{PARAGRAPH, REST, comparison_of};
 
     fn listing(old: &str, new: &str) -> String {
         let mut output = Vec::new();
@@ -49,6 +53,17 @@ mod tests {
     #[test]
     fn side_that_is_nowhere_in_its_document_has_no_page() {
         assert_eq!(listing("", "new"), "@ new p. 1\n+ new\n1 change\n");
+    }
+
+    #[test]
+    fn text_that_moved_is_listed_once() {
+        assert_eq!(
+            listing(
+                &format!("{PARAGRAPH}\n{REST}"),
+                &format!("{REST}\n{PARAGRAPH}")
+            ),
+            format!("@ old p. 1 / new p. 1\n> {PARAGRAPH}\n1 change\n")
+        );
     }
 
     #[test]

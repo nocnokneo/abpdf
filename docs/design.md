@@ -160,7 +160,9 @@ Diff:
 
 Sheets:
 
-- Pair each new page with the old page that shares most of its unchanged tokens, and add sheets only where a change would otherwise have one side missing.
+- Show a change as a whole on the pages where its two sides start.
+- Show any other page that a change is on next to the page of the other document that shares most of its unchanged tokens, or alone if none shares any.
+  Pairing the pages of a long change in order instead puts one page next to several that have nothing to do with it.
 
 ## Stack
 
@@ -201,7 +203,9 @@ The reader sits behind an interface from the start so that a second implementati
 2. First usable version: continuous text diff, artifact, region and regex filters, side-by-side PDF with connectors, only changed sheets, summary page, JSON, exit status, profile file.
    Done: with a profile of three patterns, the two revisions of the synthetic manual differ by the 16 edits to their text and nothing else, which takes 1.4 seconds to find and to write as a redline.
 3. Filter audit overlay, moved blocks, repeated table headers, page pairing.
-   The audit overlay is the first reader of filtered tokens, so it settles whether they stay in the flow among the compared ones or go to a list of their own.
+   Done: the revisions of the test corpus differ by the same changes with and without tags, and the paragraphs that change places in them and in the synthetic manual are moves.
+   Filtered tokens have a list of their own next to the compared ones.
+   What a page repeats at its top is left out for its place and not for what it says, which also covers a running header that is the same on every page, but no footer.
 4. Figures, images and style changes; table cells; detection of headers and footers in untagged documents.
    The flow takes up style and structure again here: the reader reports both, and nothing compares them yet.
 5. `hayro` reader; release archives; packaging.

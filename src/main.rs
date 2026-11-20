@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use abpdf::change::Comparison;
-use abpdf::flow::Flow;
+use abpdf::flow::RawFlow;
 use abpdf::profile::Profile;
 use abpdf::reader::ReadError;
 use abpdf::reader::pdfium::PdfiumReader;
@@ -33,6 +33,10 @@ struct Arguments {
     /// there are none
     #[arg(long, requires = "output")]
     only_if_different: bool,
+    /// Show in the redline what was left out of the comparison: outline it,
+    /// and add a sheet for every page without a change
+    #[arg(long, requires = "output")]
+    audit: bool,
     /// Write the changes as JSON to this file
     #[arg(long, value_name = "FILE")]
     json: Option<PathBuf>,
@@ -79,7 +83,11 @@ fn run(arguments: &Arguments) -> Result<bool, String> {
                 old: file_name(&arguments.old),
                 new: file_name(&arguments.new),
             };
-            let redline = Redline::of(&comparison, names.as_ref().map(String::as_str));
+            let names = names.as_ref().map(String::as_str);
+            let redline = match arguments.audit {
+                true => Redline::audit_of(&comparison, names),
+                false => Redline::of(&comparison, names),
+            };
             let pdf = redline::write(&redline, pdfs).map_err(|error| error.to_string())?;
             fs::write(path, pdf).map_err(|error| in_file(path, error))?;
         }
@@ -97,14 +105,14 @@ fn run(arguments: &Arguments) -> Result<bool, String> {
 }
 
 /// The bytes of a PDF and the flow of its text.
-fn read(path: &Path) -> Result<(Arc<Vec<u8>>, Flow), String> {
+fn read(path: &Path) -> Result<(Arc<Vec<u8>>, RawFlow), String> {
     let pdf = Arc::new(fs::read(path).map_err(|error| in_file(path, error))?);
     let reader = PdfiumReader::open(pdf.clone()).map_err(|error| match error {
         // Not a fault of this file.
         ReadError::EngineUnavailable(_) => error.to_string(),
         _ => in_file(path, error),
     })?;
-    let flow = Flow::read(&reader).map_err(|error| in_file(path, error))?;
+    let flow = RawFlow::read(&reader).map_err(|error| in_file(path, error))?;
     Ok((pdf, flow))
 }
 

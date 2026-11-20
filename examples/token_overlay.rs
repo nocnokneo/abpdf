@@ -13,9 +13,11 @@ use std::time::Instant;
 use std::{env, fs};
 
 use abpdf::BySide;
-use abpdf::flow::Flow;
+use abpdf::flow::RawFlow;
 use abpdf::reader::pdfium::PdfiumReader;
 use abpdf::redline::{self, Mark, MarkStyle, Redline, Rgb, Sheet, SheetPage};
+
+const ARTIFACT_COLOR: Rgb = Rgb::new(128, 128, 128);
 
 fn main() -> Result<(), Box<dyn Error>> {
     let arguments: Vec<String> = env::args().skip(1).collect();
@@ -26,8 +28,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let new_pdf = Arc::new(fs::read(new_path)?);
 
     let started = Instant::now();
-    let old_flow = Flow::read(&PdfiumReader::open(old_pdf.clone())?)?;
-    let new_flow = Flow::read(&PdfiumReader::open(new_pdf.clone())?)?;
+    let old_flow = RawFlow::read(&PdfiumReader::open(old_pdf.clone())?)?;
+    let new_flow = RawFlow::read(&PdfiumReader::open(new_pdf.clone())?)?;
     let read = Instant::now();
 
     let mut old_pages = sheet_pages(old_path, &old_flow).into_iter();
@@ -79,8 +81,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// One sheet page per page of the document, with a mark per token fragment.
-fn sheet_pages(path: &str, flow: &Flow) -> Vec<SheetPage> {
+/// One sheet page per page of the document, with a mark per token.
+fn sheet_pages(path: &str, flow: &RawFlow) -> Vec<SheetPage> {
     let file_name = Path::new(path)
         .file_name()
         .map_or(path.into(), |name| name.to_string_lossy());
@@ -93,21 +95,19 @@ fn sheet_pages(path: &str, flow: &Flow) -> Vec<SheetPage> {
         })
         .collect();
     for token in &flow.tokens {
-        for fragment in &token.fragments {
-            pages[fragment.page_index].marks.push(Mark {
-                bounds: fragment.bounds,
-                color: if token.is_artifact {
-                    Rgb::EXCLUDED
-                } else {
-                    Rgb::MOVED
-                },
-                style: if token.is_artifact {
-                    MarkStyle::Highlight
-                } else {
-                    MarkStyle::Outline
-                },
-            });
-        }
+        pages[token.fragment.page_index].marks.push(Mark {
+            bounds: token.fragment.bounds,
+            color: if token.is_artifact {
+                ARTIFACT_COLOR
+            } else {
+                Rgb::MOVED
+            },
+            style: if token.is_artifact {
+                MarkStyle::Highlight
+            } else {
+                MarkStyle::Outline
+            },
+        });
     }
     pages
 }

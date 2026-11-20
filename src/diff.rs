@@ -1,10 +1,11 @@
 //! Finding where two sequences of tokens differ.
 
+use std::iter;
 use std::ops::Range;
 
 use imara_diff::{Algorithm, Diff, InternedInput};
 
-use crate::BySide;
+use crate::{BySide, Side};
 
 /// A place where the sequences differ: the old range is replaced by the new
 /// one.
@@ -32,21 +33,50 @@ pub fn diff(keys: &BySide<Vec<&str>>) -> Vec<Hunk> {
             new: hunk.after.start as usize..hunk.after.end as usize,
         })
         .collect();
-    let sizes = keys.as_ref().map(|keys| Sizes::measure(keys));
-    merge_across_small_matches(matched, &sizes)
+    merge_across_small_matches(matched, &Sizes::measure(keys))
 }
 
-/// Merges neighboring hunks if the match between them is no larger than
-/// either of them, where the size of a hunk is that of its larger side.
-fn merge_across_small_matches(hunks: Vec<Hunk>, sizes: &BySide<Sizes>) -> Vec<Hunk> {
-    let size_of = |hunk: &Hunk| sizes.old.of(&hunk.old).max(sizes.new.of(&hunk.new));
+/// A run of tokens that the sequences have in common: equally many of each,
+/// which match one to one.
+pub type Match = BySide<Range<usize>>;
+
+/// The runs that the hunks of a diff leave between them in sequences of
+/// these lengths, in order.
+pub(crate) fn matches(hunks: &[Hunk], lengths: BySide<usize>) -> Vec<Match> {
+    let end = lengths.map(|length| length..length);
+    let mut start = BySide { old: 0, new: 0 };
+    let mut matches = Vec::new();
+    for hunk in hunks.iter().chain(iter::once(&end)) {
+        if hunk.old.start > start.old {
+            matches.push(BySide::from_fn(|side| start[side]..hunk[side].start));
+        }
+        start = hunk.as_ref().map(|range| range.end);
+    }
+    matches
+}
+
+/// The indices below `len` that are in none of `ranges`, which ascend.
+pub(crate) fn indices_outside(
+    len: usize,
+    ranges: &[Range<usize>],
+) -> impl Iterator<Item = usize> + '_ {
+    let starts = iter::once(0).chain(ranges.iter().map(|range| range.end));
+    let ends = ranges
+        .iter()
+        .map(|range| range.start)
+        .chain(iter::once(len));
+    starts.zip(ends).flat_map(|(start, end)| start..end)
+}
+
+/// Merges neighboring hunks if the match between them is small next to them.
+fn merge_across_small_matches(hunks: Vec<Hunk>, sizes: &Sizes) -> Vec<Hunk> {
     let mut merged: Vec<Hunk> = Vec::with_capacity(hunks.len());
     for mut hunk in hunks {
         // Merging makes the hunk larger, which can make the match before the
         // merged hunk small in turn.
         while let Some(previous) = merged.last() {
-            let match_size = sizes.old.of(&(previous.old.end..hunk.old.start));
-            if match_size > size_of(previous) || match_size > size_of(&hunk) {
+            let matched = BySide::from_fn(|side| previous[side].end..hunk[side].start);
+            if !sizes.is_small_between(&matched, previous, &hunk) {
                 break;
             }
             hunk = Hunk {
@@ -60,26 +90,47 @@ fn merge_across_small_matches(hunks: Vec<Hunk>, sizes: &BySide<Sizes>) -> Vec<Hu
     merged
 }
 
-/// The sizes of runs of keys, in characters.
-struct Sizes {
-    /// The size of all keys before each index.
-    before: Vec<usize>,
+/// The sizes of runs of tokens of the two documents, in characters.
+pub(crate) struct Sizes {
+    /// The size of all keys of each document before each index.
+    before: BySide<Vec<usize>>,
 }
 
 impl Sizes {
-    fn measure(keys: &[&str]) -> Self {
-        let mut before = Vec::with_capacity(keys.len() + 1);
-        let mut total = 0;
-        before.push(total);
-        for key in keys {
-            total += key.chars().count();
+    pub(crate) fn measure(keys: &BySide<Vec<&str>>) -> Self {
+        let before = keys.as_ref().map(|keys| {
+            let mut before = Vec::with_capacity(keys.len() + 1);
+            let mut total = 0;
             before.push(total);
-        }
+            for key in keys {
+                total += key.chars().count();
+                before.push(total);
+            }
+            before
+        });
         Self { before }
     }
 
-    fn of(&self, range: &Range<usize>) -> usize {
-        self.before[range.end] - self.before[range.start]
+    /// The size of text that has these tokens in the two documents, which is
+    /// that of its larger side.
+    pub(crate) fn of(&self, tokens: &BySide<Range<usize>>) -> usize {
+        let of_side = |side: Side| {
+            let before = &self.before[side];
+            before[tokens[side].end] - before[tokens[side].start]
+        };
+        of_side(Side::Old).max(of_side(Side::New))
+    }
+
+    /// Whether what stands between two runs is little next to them: no
+    /// larger than either.
+    pub(crate) fn is_small_between(
+        &self,
+        between: &BySide<Range<usize>>,
+        first: &BySide<Range<usize>>,
+        second: &BySide<Range<usize>>,
+    ) -> bool {
+        let size = self.of(between);
+        size <= self.of(first) && size <= self.of(second)
     }
 }
 
@@ -95,6 +146,24 @@ mod tests {
 
     fn hunk(old: Range<usize>, new: Range<usize>) -> Hunk {
         Hunk { old, new }
+    }
+
+    #[test]
+    fn matches_are_what_the_hunks_leave_between_them() {
+        let hunks = [hunk(0..1, 0..0), hunk(3..4, 2..5)];
+        let lengths = BySide { old: 6, new: 7 };
+        assert_eq!(
+            matches(&hunks, lengths),
+            [hunk(1..3, 0..2), hunk(4..6, 5..7)]
+        );
+        assert_eq!(matches(&[], lengths.map(|_| 2)), [hunk(0..2, 0..2)]);
+    }
+
+    #[test]
+    fn indices_outside_ranges_skip_what_is_in_them() {
+        let outside = |ranges: &[Range<usize>]| indices_outside(6, ranges).collect::<Vec<_>>();
+        assert_eq!(outside(&[]), [0, 1, 2, 3, 4, 5]);
+        assert_eq!(outside(&[0..2, 3..3, 4..6]), [2, 3]);
     }
 
     #[test]

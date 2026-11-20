@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use regex::Regex;
 
-use crate::flow::{Exclusion, Flow, Gap, Token};
+use crate::flow::{Exclusion, Gap, RawFlow, RawToken};
 
 /// What to leave out of a comparison, besides what the producer marked as
 /// artifacts.
@@ -28,27 +28,34 @@ pub struct Filters {
 }
 
 impl Filters {
-    /// Records on every token that a rule leaves out the first such rule.
+    /// For each token of a flow, the first rule that leaves it out, if one
+    /// does.
     ///
-    /// The flow has to be as it was read, with one fragment per token.
     /// The patterns see all text, also what another rule leaves out, so a
     /// profile works the same whether or not the producer marks artifacts.
-    pub(crate) fn apply(&self, flow: &mut Flow) {
-        for token in &mut flow.tokens {
+    pub(crate) fn exclusions(&self, flow: &RawFlow) -> Vec<Option<Exclusion>> {
+        let by_position = |token: &RawToken| {
             let page_height = flow.page_sizes[page_of(token)].height;
-            token.exclusion = self.exclusion_by_position(token, page_height);
-        }
+            self.exclusion_by_position(token, page_height)
+        };
+        let mut exclusions: Vec<Option<Exclusion>> = flow.tokens.iter().map(by_position).collect();
         let page_ranges = page_ranges(&flow.tokens);
         for (pattern_index, pattern) in self.ignore_patterns.iter().enumerate() {
             for page_range in &page_ranges {
-                let tokens = &mut flow.tokens[page_range.clone()];
-                exclude_matches(tokens, pattern, Exclusion::Pattern(pattern_index));
+                let page_text = PageText::of(&flow.tokens[page_range.clone()]);
+                for ignored in ignored_ranges(pattern, &page_text.text) {
+                    for token_index in page_text.tokens_in(&ignored) {
+                        exclusions[page_range.start + token_index]
+                            .get_or_insert(Exclusion::Pattern(pattern_index));
+                    }
+                }
             }
         }
+        exclusions
     }
 
-    fn exclusion_by_position(&self, token: &Token, page_height: f32) -> Option<Exclusion> {
-        let bounds = token.fragments[0].bounds;
+    fn exclusion_by_position(&self, token: &RawToken, page_height: f32) -> Option<Exclusion> {
+        let bounds = token.fragment.bounds;
         if token.is_artifact {
             Some(Exclusion::Artifact)
         } else if self.header_height > 0.0 && bounds.bottom <= self.header_height {
@@ -61,12 +68,12 @@ impl Filters {
     }
 }
 
-fn page_of(token: &Token) -> usize {
-    token.fragments[0].page_index
+fn page_of(token: &RawToken) -> usize {
+    token.fragment.page_index
 }
 
 /// The range of tokens of each page that has any.
-fn page_ranges(tokens: &[Token]) -> Vec<Range<usize>> {
+fn page_ranges(tokens: &[RawToken]) -> Vec<Range<usize>> {
     let mut ranges: Vec<Range<usize>> = Vec::new();
     for (index, token) in tokens.iter().enumerate() {
         match ranges.last_mut() {
@@ -75,15 +82,6 @@ fn page_ranges(tokens: &[Token]) -> Vec<Range<usize>> {
         }
     }
     ranges
-}
-
-fn exclude_matches(tokens: &mut [Token], pattern: &Regex, exclusion: Exclusion) {
-    let page_text = PageText::of(tokens);
-    for ignored in ignored_ranges(pattern, &page_text.text) {
-        for token_index in page_text.tokens_in(&ignored) {
-            tokens[token_index].exclusion.get_or_insert(exclusion);
-        }
-    }
 }
 
 /// The byte ranges of `text` that `pattern` says to leave out.
@@ -106,7 +104,7 @@ struct PageText {
 }
 
 impl PageText {
-    fn of(tokens: &[Token]) -> Self {
+    fn of(tokens: &[RawToken]) -> Self {
         let mut text = String::new();
         let mut token_ranges = Vec::with_capacity(tokens.len());
         for (index, token) in tokens.iter().enumerate() {
@@ -137,15 +135,21 @@ impl PageText {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{LINE_PITCH, PageBuilder, compared_texts, raw_flow_of};
+    use crate::testing::{LINE_PITCH, PageBuilder, raw_flow_of};
 
+    /// The texts of the tokens that the filters leave in.
     fn compared(pages: impl IntoIterator<Item = PageBuilder>, filters: &Filters) -> Vec<String> {
-        let mut flow = raw_flow_of(pages);
-        filters.apply(&mut flow);
-        compared_texts(&flow)
-            .into_iter()
-            .map(str::to_owned)
+        let flow = raw_flow_of(pages);
+        let exclusions = filters.exclusions(&flow);
+        let tokens = flow.tokens.into_iter().zip(exclusions);
+        tokens
+            .filter(|(_, exclusion)| exclusion.is_none())
+            .map(|(token, _)| token.text)
             .collect()
+    }
+
+    fn exclusions(page: PageBuilder, filters: &Filters) -> Vec<Option<Exclusion>> {
+        filters.exclusions(&raw_flow_of([page]))
     }
 
     fn ignoring(patterns: &[&str]) -> Filters {
@@ -174,10 +178,10 @@ mod tests {
             .text("Title\n")
             .body()
             .text("body");
-        let mut flow = raw_flow_of([page]);
-        Filters::default().apply(&mut flow);
-        assert_eq!(flow.tokens[0].exclusion, Some(Exclusion::Artifact));
-        assert_eq!(compared_texts(&flow), ["body"]);
+        assert_eq!(
+            exclusions(page, &Filters::default()),
+            [Some(Exclusion::Artifact), None]
+        );
     }
 
     #[test]
@@ -191,11 +195,8 @@ mod tests {
             footer_height: LINE_PITCH,
             ..Filters::default()
         };
-        let mut flow = raw_flow_of([page]);
-        filters.apply(&mut flow);
-        let exclusions: Vec<_> = flow.tokens.iter().map(|token| token.exclusion).collect();
         assert_eq!(
-            exclusions,
+            exclusions(page, &filters),
             [Some(Exclusion::Header), None, Some(Exclusion::Footer)]
         );
     }
@@ -282,11 +283,8 @@ mod tests {
     #[test]
     fn first_rule_that_leaves_a_token_out_is_recorded() {
         let page = PageBuilder::new().artifact().text("7").body().text(" 7 7");
-        let mut flow = raw_flow_of([page]);
-        ignoring(&["x", "7"]).apply(&mut flow);
-        let exclusions: Vec<_> = flow.tokens.iter().map(|token| token.exclusion).collect();
         assert_eq!(
-            exclusions,
+            exclusions(page, &ignoring(&["x", "7"])),
             [
                 Some(Exclusion::Artifact),
                 Some(Exclusion::Pattern(1)),

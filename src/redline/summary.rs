@@ -6,10 +6,11 @@ use krilla::destination::XyzDestination;
 use krilla::page::PageSettings;
 use krilla::surface::Surface;
 
+use super::paint::{OUTLINE_LINE_WIDTH, stroke_rects};
 use super::text::TextFont;
-use super::{Rgb, Summary, SummaryEntry};
+use super::{Rgb, Summary, SummaryEntry, SummaryLine};
 use crate::excerpt::shortened;
-use crate::geometry::Size;
+use crate::geometry::{Rect, Size};
 
 /// The page size of a summary without sheets to take it from: A4 on its side.
 const DEFAULT_PAGE_SIZE: Size = Size {
@@ -23,6 +24,9 @@ const FONT_SIZE: f32 = 9.0;
 const LINE_HEIGHT: f32 = 12.5;
 /// The space that the title and the line under it take on the first page.
 const HEADING_HEIGHT: f32 = 58.0;
+const LEGEND_FIRST_LINE: &str = "Text with an outline was left out of the comparison:";
+/// The height of the outline that shows a color of the legend.
+const LEGEND_SAMPLE_SIZE: f32 = 6.0;
 const ENTRY_GAP: f32 = 5.0;
 
 /// The right edge of the column of change numbers.
@@ -57,7 +61,7 @@ impl SummaryPages {
         let page_size = sheet_size.unwrap_or(DEFAULT_PAGE_SIZE);
         let bottom = page_size.height - MARGIN;
         let mut pages = vec![Vec::new()];
-        let mut top = MARGIN + HEADING_HEIGHT;
+        let mut top = MARGIN + heading_height(summary);
         for (index, entry) in summary.entries.iter().enumerate() {
             let is_first_on_page = pages.last().is_some_and(Vec::is_empty);
             if top + height_of(entry) > bottom && !is_first_on_page {
@@ -76,17 +80,20 @@ impl SummaryPages {
     }
 }
 
-fn height_of(entry: &SummaryEntry) -> f32 {
-    lines_of(entry).count() as f32 * LINE_HEIGHT
+/// The space that the heading takes on the first page: the title, the line
+/// under it and the legend, if there is one, under its own first line.
+fn heading_height(summary: &Summary) -> f32 {
+    let legend_lines = match summary.legend.len() {
+        0 => 0,
+        entries => 1 + entries,
+    };
+    HEADING_HEIGHT + legend_lines as f32 * LINE_HEIGHT
 }
 
-/// The lines of an entry: the sign, the color and the text of each side
-/// that has text.
-fn lines_of(entry: &SummaryEntry) -> impl Iterator<Item = (&'static str, Rgb, &str)> {
-    let texts = entry.texts.as_ref().map(|text| text.as_deref());
-    let lines = [("−", Rgb::REMOVED, texts.old), ("+", Rgb::ADDED, texts.new)];
-    let with_text = |(sign, color, text): (_, _, Option<_>)| Some((sign, color, text?));
-    lines.into_iter().filter_map(with_text)
+fn height_of(entry: &SummaryEntry) -> f32 {
+    // The number and the location of an entry take a line also if it has no
+    // text.
+    entry.lines.len().max(1) as f32 * LINE_HEIGHT
 }
 
 /// Draws the pages. `destinations` has, for each entry, the view of the
@@ -135,8 +142,39 @@ fn draw_heading(
     let title_position = (MARGIN, MARGIN + 14.0);
     font.draw(surface, title_position, TITLE_FONT_SIZE, TEXT_COLOR, &title);
     let counts = counts_line(summary.entries.len(), sheet_count);
-    let counts_position = (MARGIN, MARGIN + 34.0);
-    font.draw(surface, counts_position, FONT_SIZE, TEXT_COLOR, &counts);
+    let counts_baseline = MARGIN + 34.0;
+    font.draw(
+        surface,
+        (MARGIN, counts_baseline),
+        FONT_SIZE,
+        TEXT_COLOR,
+        &counts,
+    );
+
+    if summary.legend.is_empty() {
+        return;
+    }
+    let legend_baseline = counts_baseline + 1.5 * LINE_HEIGHT;
+    let legend_position = (MARGIN, legend_baseline);
+    font.draw(
+        surface,
+        legend_position,
+        FONT_SIZE,
+        TEXT_COLOR,
+        LEGEND_FIRST_LINE,
+    );
+    for (line_index, entry) in summary.legend.iter().enumerate() {
+        let baseline = legend_baseline + (line_index + 1) as f32 * LINE_HEIGHT;
+        let sample = Rect {
+            left: MARGIN,
+            top: baseline - LEGEND_SAMPLE_SIZE,
+            right: MARGIN + 2.0 * LEGEND_SAMPLE_SIZE,
+            bottom: baseline,
+        };
+        stroke_rects(surface, [sample], entry.color, OUTLINE_LINE_WIDTH);
+        let text_position = (sample.right + LEGEND_SAMPLE_SIZE, baseline);
+        font.draw(surface, text_position, FONT_SIZE, TEXT_COLOR, &entry.text);
+    }
 }
 
 fn draw_entry(
@@ -165,11 +203,12 @@ fn draw_entry(
         TEXT_COLOR,
         &entry.location,
     );
-    for (line, (sign, color, text)) in lines_of(entry).enumerate() {
-        let baseline = baseline + line as f32 * LINE_HEIGHT;
-        let text = font.fitted(text, FONT_SIZE, page_width - MARGIN - TEXT_LEFT);
-        font.draw(surface, (SIGN_LEFT, baseline), FONT_SIZE, color, sign);
-        font.draw(surface, (TEXT_LEFT, baseline), FONT_SIZE, color, &text);
+    for (line_index, line) in entry.lines.iter().enumerate() {
+        let baseline = baseline + line_index as f32 * LINE_HEIGHT;
+        let sign = line.sign.to_string();
+        let text = font.fitted(&line.text, FONT_SIZE, page_width - MARGIN - TEXT_LEFT);
+        font.draw(surface, (SIGN_LEFT, baseline), FONT_SIZE, line.color, &sign);
+        font.draw(surface, (TEXT_LEFT, baseline), FONT_SIZE, line.color, &text);
     }
 }
 
@@ -179,22 +218,21 @@ fn counts_line(change_count: usize, sheet_count: usize) -> String {
         0 => "No differences".to_owned(),
         _ => format!(
             "{change_count} change{} on {sheet_count} sheet{}. \
-             Removed text is red on the left, added text is green on the right.",
+             Removed text is red on the left, added text is green on the right, \
+             and moved text is blue on both sides.",
             plural(change_count),
             plural(sheet_count),
         ),
     }
 }
 
-/// The title of the bookmark of the entry at `index`.
+/// The title of the bookmark of the entry at `index`: its one text with its
+/// sign, or its texts one after the other.
 pub(super) fn bookmark_title(index: usize, entry: &SummaryEntry) -> String {
-    let texts = entry.texts.as_ref();
-    let texts = texts.map(|text| Some(shortened(text.as_ref()?, BOOKMARK_TEXT_CHARS)));
-    let texts = match (texts.old, texts.new) {
-        (Some(old), Some(new)) => format!("{old} → {new}"),
-        (Some(old), None) => format!("− {old}"),
-        (None, Some(new)) => format!("+ {new}"),
-        (None, None) => String::new(),
+    let shortened = |line: &SummaryLine| shortened(&line.text, BOOKMARK_TEXT_CHARS);
+    let texts = match entry.lines.as_slice() {
+        [line] => format!("{} {}", line.sign, shortened(line)),
+        lines => lines.iter().map(shortened).collect::<Vec<_>>().join(" → "),
     };
     format!("{}. {texts}", index + 1)
 }
@@ -202,17 +240,20 @@ pub(super) fn bookmark_title(index: usize, entry: &SummaryEntry) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::BySide;
-    use crate::redline::Target;
+    use crate::redline::{LegendEntry, Target};
 
+    /// An entry for a change with these texts.
     fn entry(old_text: Option<&str>, new_text: Option<&str>) -> SummaryEntry {
-        let texts = BySide {
-            old: old_text,
-            new: new_text,
+        let line = |sign, color, text: &str| SummaryLine {
+            sign,
+            color,
+            text: text.to_owned(),
         };
+        let removed = old_text.map(|text| line('−', Rgb::REMOVED, text));
+        let added = new_text.map(|text| line('+', Rgb::ADDED, text));
         SummaryEntry {
             location: "old p. 1 / new p. 1".to_owned(),
-            texts: texts.map(|text| text.map(str::to_owned)),
+            lines: removed.into_iter().chain(added).collect(),
             target: Target {
                 sheet_index: 0,
                 top: 0.0,
@@ -223,6 +264,7 @@ mod tests {
     fn summary_of(entries: Vec<SummaryEntry>) -> Summary {
         Summary {
             title: "old → new".to_owned(),
+            legend: Vec::new(),
             entries,
         }
     }
@@ -285,6 +327,28 @@ mod tests {
     }
 
     #[test]
+    fn entries_start_under_the_legend_if_there_is_one() {
+        let first_entry_top = |legend: Vec<LegendEntry>| {
+            let summary = Summary {
+                legend,
+                ..summary_of(vec![entry(Some("old"), None)])
+            };
+            SummaryPages::of(&summary, None).pages[0][0].top
+        };
+        let legend_entry = || LegendEntry {
+            color: Rgb::new(128, 128, 128),
+            text: "left out".to_owned(),
+        };
+        let without_legend = first_entry_top(Vec::new());
+        assert_eq!(without_legend, MARGIN + HEADING_HEIGHT);
+        // A line for each entry of the legend, and one that introduces them.
+        assert_eq!(
+            first_entry_top(vec![legend_entry(), legend_entry()]),
+            without_legend + 3.0 * LINE_HEIGHT
+        );
+    }
+
+    #[test]
     fn entry_with_both_texts_takes_two_lines() {
         assert_eq!(
             height_of(&entry(Some("old"), Some("new"))),
@@ -314,6 +378,15 @@ mod tests {
         );
         assert_eq!(bookmark_title(1, &entry(None, Some("new"))), "2. + new");
         assert_eq!(bookmark_title(2, &entry(Some("old"), None)), "3. − old");
+        let moved = SummaryEntry {
+            lines: vec![SummaryLine {
+                sign: '⇄',
+                color: Rgb::MOVED,
+                text: "moved".to_owned(),
+            }],
+            ..entry(None, None)
+        };
+        assert_eq!(bookmark_title(3, &moved), "4. ⇄ moved");
     }
 
     #[test]

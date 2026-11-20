@@ -8,7 +8,7 @@ use krilla::text::{Font, TextDirection};
 use ttf_parser::Face;
 
 use super::Rgb;
-use super::render::fill;
+use super::paint::fill;
 use crate::excerpt::ELLIPSIS;
 
 static FONT_DATA: &[u8] = include_bytes!("../../assets/fonts/DejaVuSans.ttf");

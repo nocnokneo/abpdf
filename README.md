@@ -12,20 +12,42 @@ It is meant for revisions of generated documents: specifications, manuals, repor
 
     abpdf old.pdf new.pdf -o redline.pdf
 
-abpdf lists the changes on standard output.
+abpdf lists the changes on standard output, in the order of the new document:
+
+    @ old p. 3 / new p. 4
+    - shall be calibrated annually
+    + must be verified every month
+    @ old p. 2 / new p. 7
+    > A paragraph that moved from the second page to the seventh.
+    2 changes
+
 Like `diff`, it exits with 0 if there are none, with 1 if there are some and with 2 if the comparison failed.
 
 | Option | Effect |
 | -- | -- |
 | `-o`, `--output FILE` | Write the redline to `FILE`. |
 | `--only-if-different` | Write the redline only if there are changes, and remove `FILE` if there are none. |
+| `--audit` | Show in the redline what was left out of the comparison. |
 | `--json FILE` | Write the changes to `FILE` as JSON. |
 | `--profile FILE` | Read the settings of the comparison from `FILE`. |
 
+### The redline
+
 The redline is a PDF that starts with a summary of the changes.
 It is written even if there are none, as a summary that says so, unless `--only-if-different` is given.
-After it comes a sheet for each pair of pages with a change: the old page on the left and the new page on the right, with removed text marked in red and added text in green.
 The entries of the summary and the bookmarks of the PDF link to the changes.
+
+After the summary come the sheets.
+A sheet shows an old page on the left and a new page on the right, with removed text marked in red, added text in green and moved text in blue.
+A band across the gutter joins the two sides of a change and has its number in the summary.
+
+- A change is shown on the pages where it starts.
+- Any other page that a change is on is shown next to the page of the other document that has most of the same text, or alone if no page has any of it.
+  The band of the change ends in the gutter on a sheet that shows one of its sides only.
+- Pages without a change are left out, and a note says which.
+
+With `--audit`, the redline also shows what was left out of the comparison, to check the profile with.
+Text that was left out has an outline in a color that tells why, which the summary explains, and the pages without a change are shown too.
 
 ### What is compared
 
@@ -33,6 +55,13 @@ abpdf compares words and punctuation marks, and ignores how the text is broken i
 
 Text that the producer of the PDF marked as an artifact is not compared.
 In a tagged PDF from Typst that covers headers, footers, the leaders of the table of contents, table headers that are repeated after a page break, and text in `pdf.artifact`.
+
+Text that a page repeats at its top is not compared either: a running header, or the header of a table that continues from the page before.
+abpdf takes for such a repeat the first lines of a page that also stand on the page before, with the same words at the same places across the page.
+A repeat is still compared where the other document has the same text and does not repeat it there.
+
+Text that stands at another place in the new document is reported as moved, if it has at least 20 characters.
+Where moved text also changed a little, what changed is reported as a change of its own.
 
 ### Profile
 
@@ -78,7 +107,9 @@ ignore_patterns = [
 }
 ```
 
-- `kind` is `inserted`, `deleted` or `replaced`.
+- The changes are in the order of the new document.
+- `kind` is `inserted`, `deleted`, `replaced` or `moved`.
+- Text that moved has its old place in `old` and its new place in `new`.
 - A side has one area for each line that its text is on.
   Pages are numbered from 1, and the edges of an area are distances in points from the left and the top edge of its page.
 - The side of a change that has no text has one area of no width, at the place where the text of the other side would be.

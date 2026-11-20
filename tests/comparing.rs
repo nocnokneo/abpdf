@@ -4,17 +4,25 @@ mod common;
 
 use std::sync::Arc;
 
-use abpdf::BySide;
 use abpdf::change::{ChangeKind, ChangeSide, Comparison};
 use abpdf::filter::Filters;
+use abpdf::flow::Exclusion;
 use abpdf::profile::Profile;
+use abpdf::{BySide, Side};
 
-use common::{both, compare, compare_and_redline, corpus, corpus_path, flow_of, texts};
+use common::page_texts;
+use common::{REVISIONS_CHANGE_COUNT, both, compare, compare_and_redline, corpus, corpus_path};
 
-use ChangeKind::{Deleted, Inserted, Replaced};
+use ChangeKind::{Deleted, Inserted, Moved, Replaced};
+
+const STORAGE_OLD: &str =
+    "Store the instrument in its case when it is not in use, in a dry room that is free of dust.";
+const STORAGE_NEW: &str =
+    "Store the instrument in its case when it is not in use, in a cool room that is free of dust.";
+const CHECK: &str = "Check the supply voltage at the start of every series of measurements.";
 
 /// What the edits in the source have to be reported as.
-const EDITS: [(ChangeKind, &str, &str); 11] = [
+const EDITS: [(ChangeKind, &str, &str); REVISIONS_CHANGE_COUNT] = [
     (Inserted, "", "Monitoring"),
     (
         Inserted,
@@ -34,6 +42,8 @@ const EDITS: [(ChangeKind, &str, &str); 11] = [
         "Monitoring The monitoring interface is read only.",
     ),
     (Deleted, "Notes are set in italic type.", ""),
+    // Of the two paragraphs that change places, the shorter one moved.
+    (Moved, CHECK, CHECK),
     (
         Inserted,
         "",
@@ -44,6 +54,10 @@ const EDITS: [(ChangeKind, &str, &str); 11] = [
     (Deleted, ",", ""),
     (Replaced, ".", "!"),
     (Replaced, "Notwithstanding", "Despite"),
+    // The paragraph that moved to the last section, and the word that
+    // changed in it.
+    (Moved, STORAGE_OLD, STORAGE_NEW),
+    (Replaced, "dry", "cool"),
 ];
 
 /// The old and the new revision, with or without tags.
@@ -75,20 +89,26 @@ fn summaries(comparison: &Comparison) -> Vec<(ChangeKind, &str, &str)> {
 }
 
 #[test]
-fn tagged_revisions_differ_by_their_edits() {
-    let comparison = compare_revisions("tagged", &profile().filters);
-    assert_eq!(summaries(&comparison), EDITS);
+fn revisions_differ_by_their_edits() {
+    for tagging in ["tagged", "untagged"] {
+        let comparison = compare_revisions(tagging, &profile().filters);
+        assert_eq!(summaries(&comparison), EDITS, "{tagging}");
+    }
 }
 
 #[test]
-fn untagged_revisions_also_differ_by_the_table_header_that_a_page_break_repeats() {
-    let comparison = compare_revisions("untagged", &profile().filters);
-    let header = "Parameter Meaning Default";
-    let mut expected = EDITS.to_vec();
+fn table_header_that_a_page_break_repeats_is_left_out_without_tags() {
     // The table breaks one row later in the new revision, and without tags
-    // nothing says that the header after the break is a repeat.
-    expected.splice(7..7, [(Inserted, "", header), (Deleted, header, "")]);
-    assert_eq!(summaries(&comparison), expected);
+    // nothing but its place says that the header after the break is a repeat.
+    let comparison = compare_revisions("untagged", &profile().filters);
+    for side in Side::BOTH {
+        let excluded = comparison.flows[side].excluded.iter();
+        let repeats: Vec<&str> = excluded
+            .filter(|excluded| excluded.exclusion == Exclusion::Repeat)
+            .map(|excluded| excluded.token.text.as_str())
+            .collect();
+        assert_eq!(repeats, ["Parameter", "Meaning", "Default"], "{side}");
+    }
 }
 
 #[test]
@@ -134,17 +154,12 @@ fn change_is_located_on_its_text() {
 fn redline_lists_the_changes_and_shows_their_pages() {
     let (_, redline, output) = compare_and_redline(revisions("tagged"), &profile().filters);
 
-    let flow = flow_of(Arc::new(output));
-    let page_count = flow.page_sizes.len();
-    assert_eq!(page_count, 1 + redline.sheets.len());
-    let on_page = |page_index: usize| -> Vec<&str> {
-        let tokens = flow.tokens.iter();
-        texts(tokens.filter(|token| token.fragments[0].page_index == page_index))
-    };
+    let pages = page_texts(Arc::new(output));
+    assert_eq!(pages.len(), 1 + redline.sheets.len());
 
-    let summary = on_page(0).join(" ");
+    let summary = &pages[0];
     assert!(
-        summary.starts_with("old.pdf → new.pdf 11 changes on 4 sheets"),
+        summary.starts_with("old.pdf → new.pdf 14 changes on 5 sheets"),
         "{summary}"
     );
     assert!(
@@ -156,21 +171,30 @@ fn redline_lists_the_changes_and_shows_their_pages() {
         "{summary}"
     );
 
-    let first_sheet = on_page(1).join(" ");
+    let first_sheet = &pages[1];
     assert!(
         first_sheet.contains("old.pdf — page 1 of 3"),
         "{first_sheet}"
     );
     assert!(
-        first_sheet.contains("new.pdf — page 1 of 3"),
+        first_sheet.contains("new.pdf — page 1 of 4"),
         "{first_sheet}"
     );
     // The source pages are there as text, both of them.
     assert_eq!(first_sheet.matches("Operating manual").count(), 2);
-    let last_sheet = on_page(page_count - 1).join(" ");
+    // The last sheet shows the paragraph that moved, where it was and where
+    // it is.
+    let last_sheet = pages.last().unwrap();
     assert!(
-        last_sheet.contains("Despite the robustness"),
+        last_sheet.contains("old.pdf — page 1 of 3")
+            && last_sheet.contains("new.pdf — page 4 of 4"),
         "{last_sheet}"
+    );
+    assert_eq!(
+        last_sheet
+            .matches("Store the instrument in its case")
+            .count(),
+        2
     );
 }
 
@@ -187,7 +211,7 @@ fn redline_of_equal_documents_is_a_summary_that_says_so() {
     let pdfs = both(revisions("tagged").old);
     let (_, _, output) = compare_and_redline(pdfs, &Filters::default());
 
-    let flow = flow_of(Arc::new(output));
-    assert_eq!(flow.page_sizes.len(), 1);
-    assert!(texts(&flow.tokens).join(" ").ends_with("No differences"));
+    let pages = page_texts(Arc::new(output));
+    assert_eq!(pages.len(), 1);
+    assert!(pages[0].ends_with("No differences"), "{}", pages[0]);
 }
