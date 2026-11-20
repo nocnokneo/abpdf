@@ -184,6 +184,7 @@ fn draw_marks(surface: &mut Surface, layout: &SheetLayout, side: Side, marks: &[
             MarkStyle::Highlight => highlight_rects(surface, rects, color),
             MarkStyle::Outline => stroke_rects(surface, rects, color, OUTLINE_LINE_WIDTH),
             MarkStyle::Caret => stroke_left_edges(surface, rects, color),
+            MarkStyle::Frame => stroke_rects(surface, rects, color, 1.5),
         }
     }
 }

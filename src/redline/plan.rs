@@ -104,6 +104,13 @@ impl Planner<'_> {
                 style,
             };
             marks.extend(change_side.areas().iter().filter(on_page).map(to_mark));
+            // PROTOTYPE: a graphic also gets a frame.
+            let figures = change_side.areas().iter().filter(on_page);
+            marks.extend(figures.filter(|area| area.is_figure).map(|area| Mark {
+                bounds: area.bounds,
+                color,
+                style: MarkStyle::Frame,
+            }));
         }
         SheetPage {
             page_index,

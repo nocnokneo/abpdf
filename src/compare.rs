@@ -38,6 +38,10 @@ impl Comparison {
             true => whole_hunks,
             false => diff::diff(&in_place.as_ref().map(Sequence::keys)),
         };
+        let hunks = match crate::prototype::splits_changes_by_cell() {
+            true => split_by_cell(hunks, &in_place),
+            false => hunks,
+        };
         let page_partners = partners::page_partners(&in_place, &hunks);
 
         let all_in_place = in_place.as_ref().map(|sequence| 0..sequence.tokens.len());
@@ -87,4 +91,33 @@ fn changes_within(
         }
     }
     changes
+}
+
+/// PROTOTYPE: a hunk whose two sides go through the same number of table
+/// cells, and more than one, as one hunk for each of the cells.
+fn split_by_cell(hunks: Vec<Hunk>, sequences: &BySide<Sequence>) -> Vec<Hunk> {
+    let mut split = Vec::new();
+    for hunk in hunks {
+        let runs = BySide::from_fn(|side| cell_runs(&sequences[side], hunk[side].clone()));
+        if runs.old.len() == runs.new.len() && runs.old.len() > 1 {
+            let pairs = runs.old.into_iter().zip(runs.new);
+            split.extend(pairs.map(|(old, new)| BySide { old, new }));
+        } else {
+            split.push(hunk);
+        }
+    }
+    split
+}
+
+/// The runs of positions whose tokens are in one cell, or in none.
+fn cell_runs(sequence: &Sequence, positions: Range<usize>) -> Vec<Range<usize>> {
+    let mut runs: Vec<Range<usize>> = Vec::new();
+    for position in positions {
+        let cell = sequence.tokens[position].cell;
+        match runs.last_mut() {
+            Some(run) if sequence.tokens[run.start].cell == cell => run.end = position + 1,
+            _ => runs.push(position..position + 1),
+        }
+    }
+    runs
 }

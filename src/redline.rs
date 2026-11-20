@@ -118,6 +118,8 @@ pub enum MarkStyle {
     Outline,
     /// A line down the left edge, to mark a place between two characters.
     Caret,
+    /// PROTOTYPE: a thick outline, around a graphic.
+    Frame,
 }
 
 /// A band across the gutter that joins the two sides of a change.

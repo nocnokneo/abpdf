@@ -119,6 +119,8 @@ pub enum ChangeSide {
 pub struct Area {
     pub page_index: usize,
     pub bounds: Rect,
+    /// PROTOTYPE: whether the area is that of a graphic.
+    pub is_figure: bool,
 }
 
 impl Change {

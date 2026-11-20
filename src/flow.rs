@@ -11,6 +11,7 @@ mod join;
 mod tests;
 
 use std::borrow::Cow;
+use std::ops::Range;
 
 use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfkc_quick};
 
@@ -91,6 +92,11 @@ pub struct RawToken {
     pub styles: Vec<usize>,
     /// Whether the producer marked the token as an artifact.
     pub is_artifact: bool,
+    /// PROTOTYPE: the table cell the token is in, as its page and the number
+    /// of the cell on that page.
+    pub cell: Option<(usize, usize)>,
+    /// PROTOTYPE: the fingerprint of the graphic that the token stands for.
+    pub figure: Option<u64>,
     /// The hyphen that ends a line right after the token.
     pub line_end_hyphen: Option<LineEndHyphen>,
 }
@@ -118,13 +124,23 @@ pub struct Token {
     /// The styles of the characters, as indices into [`Flow::styles`]: one
     /// for each run of characters in one style.
     pub styles: Vec<usize>,
+    /// PROTOTYPE: where the token stands among the tokens as they are read,
+    /// left out or not: from its first part to after its last.
+    pub raw_indices: Range<usize>,
+    /// PROTOTYPE: the table cell the token is in.
+    pub cell: Option<(usize, usize)>,
+    /// PROTOTYPE: the fingerprint of the graphic that the token stands for.
+    pub figure: Option<u64>,
 }
 
 impl Token {
     /// The form of the text that is compared: compatibility characters such as
     /// ligatures are folded into their plain equivalents.
     pub fn key(&self) -> Cow<'_, str> {
-        key_of(&self.text)
+        match self.figure {
+            Some(fingerprint) => Cow::Owned(format!("\u{FFFC}{fingerprint:016x}")),
+            None => key_of(&self.text),
+        }
     }
 }
 

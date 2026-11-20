@@ -1,0 +1,6 @@
+ignore_patterns = [
+    # Figure and table numbers.
+    '(?:Figure|Table) (\d+)',
+    # Page references.
+    '\(p\. \d+\)',
+]

@@ -1,5 +1,6 @@
 //! A [`Reader`] backed by PDFium.
 
+mod figures;
 mod handles;
 mod library;
 mod page_space;
@@ -78,11 +79,34 @@ impl Reader for PdfiumReader {
         } else {
             HashMap::new()
         };
-        let (spans, text) = text::read(&page, &page_space, &structure_paths);
+        let cells = if self.is_tagged {
+            structure::cells_by_marked_content_id(&page)
+        } else {
+            HashMap::new()
+        };
+        let page_figures = figures::read(&page, &page_space, crate::prototype::figures());
+        let figure_orders: Vec<usize> = page_figures
+            .figures
+            .iter()
+            .map(|(order, _)| *order)
+            .collect();
+        let (spans, text) = text::read(
+            &page,
+            &page_space,
+            &structure_paths,
+            &cells,
+            &page_figures.object_orders,
+            &figure_orders,
+        );
         Ok(Page {
             size: page_space.size(),
             spans,
             text,
+            figures: page_figures
+                .figures
+                .into_iter()
+                .map(|(_, figure)| figure)
+                .collect(),
         })
     }
 }

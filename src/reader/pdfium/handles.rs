@@ -68,6 +68,23 @@ impl<'a> LoadedPage<'a> {
         })
     }
 
+    /// PROTOTYPE: every object of the page, in the order in which they are
+    /// drawn.
+    pub fn objects(&self) -> Vec<TextObject<'a>> {
+        // SAFETY: the page is loaded, and PDFium checks the index.
+        let count = unsafe { self.pdfium.FPDFPage_CountObjects(self.handle) }.max(0);
+        let handles = (0..count).map(|index| unsafe {
+            self.pdfium.FPDFPage_GetObject(self.handle, index)
+        });
+        handles
+            .filter(|handle| !handle.is_null())
+            .map(|handle| TextObject {
+                pdfium: self.pdfium,
+                handle,
+            })
+            .collect()
+    }
+
     /// `None` if the page has no part in a structure tree.
     pub fn structure_tree(&self) -> Option<StructureTree<'_>> {
         // SAFETY: the page is loaded.
@@ -219,6 +236,16 @@ impl<'a> TextObject<'a> {
     /// What tells this object from the other objects of its page.
     pub fn identity(&self) -> usize {
         self.handle as usize
+    }
+
+    /// PROTOTYPE: for code that calls PDFium itself.
+    pub fn handle(&self) -> FPDF_PAGEOBJECT {
+        self.handle
+    }
+
+    /// PROTOTYPE: for code that calls PDFium itself.
+    pub fn library(&self) -> &'a Library {
+        self.pdfium
     }
 
     /// The identifier that ties the object to the structure tree, if it has

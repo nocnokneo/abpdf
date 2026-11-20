@@ -22,6 +22,9 @@ pub(super) fn read(
     page: &LoadedPage,
     page_space: &PageSpace,
     structure_paths: &HashMap<c_int, String>,
+    cells: &HashMap<c_int, usize>,
+    object_orders: &HashMap<usize, usize>,
+    figure_orders: &[usize],
 ) -> (Vec<Span>, Vec<TextItem>) {
     let Some(text_page) = page.text() else {
         return (Vec::new(), Vec::new());
@@ -30,6 +33,9 @@ pub(super) fn read(
         text_page: &text_page,
         page_space,
         structure_paths,
+        cells,
+        object_orders,
+        figure_orders,
         spans: Vec::new(),
         span_by_object: HashMap::new(),
     };
@@ -41,6 +47,11 @@ struct TextReader<'a> {
     text_page: &'a TextPage<'a>,
     page_space: &'a PageSpace,
     structure_paths: &'a HashMap<c_int, String>,
+    cells: &'a HashMap<c_int, usize>,
+    /// PROTOTYPE: the place of each object among the objects of the page.
+    object_orders: &'a HashMap<usize, usize>,
+    /// PROTOTYPE: the place of the first object of each graphic.
+    figure_orders: &'a [usize],
     spans: Vec<Span>,
     /// The span of each text object by its identity, and of the characters
     /// that no object draws under `None`.
@@ -52,11 +63,25 @@ impl TextReader<'_> {
         let count = self.text_page.char_count();
         let mut items = Vec::with_capacity(count as usize);
         let mut index = 0;
+        // PROTOTYPE: a graphic comes before the first character that is
+        // drawn after it.
+        let mut next_figure = 0;
         while index < count {
             let (code, code_unit_count) = self.read_code_point(index);
+            let object = self.text_page.text_object(index);
+            let order = object.and_then(|object| self.object_orders.get(&object.identity()));
+            while self
+                .figure_orders
+                .get(next_figure)
+                .is_some_and(|figure_order| order.is_some_and(|order| figure_order < order))
+            {
+                items.push(TextItem::Figure(next_figure));
+                next_figure += 1;
+            }
             items.extend(self.read_item(index, code));
             index += code_unit_count;
         }
+        items.extend((next_figure..self.figure_orders.len()).map(TextItem::Figure));
         items
     }
 
@@ -113,6 +138,7 @@ impl TextReader<'_> {
             style: self.read_style(index),
             is_artifact: false,
             structure_path: None,
+            cell: None,
             actual_text: None,
         };
         let Some(object) = object else {
@@ -126,6 +152,9 @@ impl TextReader<'_> {
         span.structure_path = object
             .marked_content_id()
             .and_then(|id| self.structure_paths.get(&id).cloned());
+        span.cell = object
+            .marked_content_id()
+            .and_then(|id| self.cells.get(&id).copied());
         span
     }
 

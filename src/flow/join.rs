@@ -79,9 +79,9 @@ pub(super) fn join(screened: Screened, vocabulary: &Vocabulary) -> Flow {
     // what it means.
     let mut open_hyphen: Option<LineEndHyphen> = None;
 
-    for (raw, exclusion) in flow.tokens.into_iter().zip(exclusions) {
+    for (raw_index, (raw, exclusion)) in flow.tokens.into_iter().zip(exclusions).enumerate() {
         if let Some(exclusion) = exclusion {
-            excluded.push(excluded_token(raw, exclusion));
+            excluded.push(excluded_token(raw, raw_index, exclusion));
             continue;
         }
         let mut gap = raw.gap;
@@ -94,6 +94,7 @@ pub(super) fn join(screened: Screened, vocabulary: &Vocabulary) -> Flow {
                     word.fragments.push(raw.fragment);
                     word.styles.extend(raw.styles);
                     word.styles.dedup();
+                    word.raw_indices.end = raw_index + 1;
                     open_hyphen = raw.line_end_hyphen;
                     continue;
                 }
@@ -108,7 +109,7 @@ pub(super) fn join(screened: Screened, vocabulary: &Vocabulary) -> Flow {
         open_hyphen = raw.line_end_hyphen;
         tokens.push(Token {
             gap,
-            ..token_of(raw)
+            ..token_of(raw, raw_index)
         });
     }
 
@@ -178,14 +179,17 @@ fn hyphen_token(hyphen: &LineEndHyphen, word: &Token) -> Token {
         fragments: vec![hyphen.fragment],
         gap: Gap::None,
         styles: word.styles.last().copied().into_iter().collect(),
+        raw_indices: word.raw_indices.end..word.raw_indices.end,
+        cell: word.cell,
+        figure: None,
     }
 }
 
 /// A token that is left out as it is read, with the hyphen that may end its
 /// line as part of where it is drawn.
-fn excluded_token(raw: RawToken, exclusion: Exclusion) -> ExcludedToken {
+fn excluded_token(raw: RawToken, raw_index: usize, exclusion: Exclusion) -> ExcludedToken {
     let hyphen = raw.line_end_hyphen;
-    let mut token = token_of(raw);
+    let mut token = token_of(raw, raw_index);
     if let Some(hyphen) = hyphen {
         extend_to_hyphen(&mut token, &hyphen);
     }
@@ -194,11 +198,14 @@ fn excluded_token(raw: RawToken, exclusion: Exclusion) -> ExcludedToken {
 
 /// The token as it is read: on one line, and without the hyphen that may
 /// end the line.
-fn token_of(raw: RawToken) -> Token {
+fn token_of(raw: RawToken, raw_index: usize) -> Token {
     Token {
         text: raw.text,
         fragments: vec![raw.fragment],
         gap: raw.gap,
         styles: raw.styles,
+        raw_indices: raw_index..raw_index + 1,
+        cell: raw.cell,
+        figure: raw.figure,
     }
 }

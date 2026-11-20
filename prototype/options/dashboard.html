@@ -1,0 +1,201 @@
+<!-- PROTOTYPE: the options of step 4 side by side. The pictures come from build.py. -->
+<style>
+  .d { font: 14px/1.5 var(--font-sans); color: var(--foreground); }
+  .d * { box-sizing: border-box; }
+  .d p { margin: 0; }
+  .d .lede { color: var(--muted-foreground); margin-bottom: 28px; }
+  .d section { margin-bottom: 44px; }
+  .d h2 { font-size: 18px; line-height: 1.3; font-weight: 650; margin: 0 0 6px; display: flex; gap: 10px; }
+  .d h2 .num { color: var(--muted-foreground); font-weight: 500; }
+  .d .setup { color: var(--muted-foreground); margin-bottom: 16px; max-width: 64ch; }
+  .d .grid { display: grid; gap: 8px 12px; align-items: start; }
+  .d .g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .d .g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .d .opt { font-size: 13px; font-weight: 650; line-height: 1.3; padding-bottom: 6px; border-bottom: 2px solid var(--border);
+            display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; align-self: end; }
+  .d .opt.pick { border-bottom-color: var(--primary); }
+  .d .tag { font-size: 11px; font-weight: 650; line-height: 1.5; padding: 0 8px; border-radius: 999px;
+            background: var(--primary); color: var(--primary-foreground); white-space: nowrap; }
+  .d .row { grid-column: 1 / -1; font-size: 12.5px; color: var(--muted-foreground); margin-top: 8px; }
+  .d .cell-label { display: none; font-size: 12px; font-weight: 650; margin-bottom: 4px; }
+  .d .caption { font-size: 12.5px; color: var(--muted-foreground); margin-bottom: 6px; }
+  .d img { display: block; width: 100%; height: auto; background: #fff; border: 1px solid var(--border);
+           border-radius: calc(var(--radius) - 2px); }
+  .d .stack > * + * { margin-top: 8px; }
+  .d .stack .opt { margin-top: 18px; }
+  .d pre { font: 12px/1.5 var(--font-mono); background: var(--code-background); color: var(--foreground);
+           padding: 10px 12px; border-radius: var(--radius); margin: 0; overflow-x: auto; }
+  .d .rm { color: var(--destructive); }
+  .d .ad { color: var(--success); }
+  .d .dim { color: var(--muted-foreground); }
+  .d ul { margin: 14px 0 0; padding-left: 18px; }
+  .d li { margin: 4px 0; }
+  .d li::marker { color: var(--muted-foreground); }
+  .d .pickbox { margin-top: 16px; padding: 14px 16px; background: var(--card); color: var(--card-foreground);
+                border: 1px solid var(--border); border-radius: var(--radius); }
+  .d .pickbox b { font-weight: 650; }
+  .d table { border-collapse: collapse; width: 100%; margin-top: 16px; font-size: 13px; }
+  .d th, .d td { text-align: left; vertical-align: top; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--border); }
+  .d th { font-weight: 650; }
+  .d td.n { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .d code { font: 12.5px var(--font-mono); background: var(--code-background); padding: 1px 4px; border-radius: 4px; }
+  @media (max-width: 520px) {
+    .d .g2, .d .g3 { grid-template-columns: minmax(0, 1fr); }
+    .d .grid > .opt { display: none; }
+    .d .cell-label { display: block; }
+  }
+</style>
+
+<div class="d">
+  <p class="lede">
+    Every picture is cut from a redline that a throwaway build of abpdf wrote, with one option switched on at a time.
+    My pick is marked in each section.
+  </p>
+
+  <section>
+    <h2><span class="num">1</span>Highlights over text that is left out</h2>
+    <p class="setup">
+      The profile ignores figure and table numbers and page references.
+      In each sentence, words change on both sides of one.
+      Old page shown; the new page mirrors it.
+    </p>
+    <div class="grid g2">
+      <div class="opt">As today</div>
+      <div class="opt pick">Split around it <span class="tag">my pick</span></div>
+
+      <div class="row">The redline</div>
+      <div><div class="cell-label">As today</div><img src="/home/devuser/abpdf-options/prototype/options/out/leftout-today-old.png" alt="Today: the red highlight runs over the figure number 3 and over the page reference (p. 12)"></div>
+      <div><div class="cell-label">Split around it</div><img src="/home/devuser/abpdf-options/prototype/options/out/leftout-split-old.png" alt="Split: the red highlight stops before the figure number 3 and before (p. 12), and starts again after them"></div>
+
+      <div class="row">With <code>--audit</code>, which outlines what was left out</div>
+      <div><div class="cell-label">As today</div><img src="/home/devuser/abpdf-options/prototype/options/out/leftout-today-audit-old.png" alt="Today with audit: the outlines of the left-out number and page reference lie inside the highlight; the header has two outlines"></div>
+      <div><div class="cell-label">Split around it</div><img src="/home/devuser/abpdf-options/prototype/options/out/leftout-split-audit-old.png" alt="Split with audit: the outlines stand in the gaps of the highlight; the header has one outline over its whole line"></div>
+    </div>
+    <ul>
+      <li>Today the highlight runs over <code>3</code> and <code>(p. 12)</code>, which the comparison never looked at.</li>
+      <li>Split, the highlight is exactly the text that the listing and the JSON report. Both report the same 2 changes either way; only the areas differ.</li>
+      <li>The audit outlines follow the same rule instead of a distance threshold, so the two halves of the header become one outline. I can leave the outlines as they are and split only the highlights.</li>
+    </ul>
+    <div class="pickbox">
+      <b>Split, and in step 4 rather than PR 5.</b>
+      It changes what PR 5 draws, and PR 5 is green with output that stayed byte-identical through its review fixes.
+      It also needs a new field on every token, next to the ones step 4 already adds.
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">2</span>Table cells</h2>
+    <p class="setup">
+      One tagged table with four edits: two neighbouring cells of row P3 change, row P5a is added, row P9 is removed,
+      and the last cell of row P10 changes together with the first cell of row P11.
+      Old page and connector numbers shown.
+    </p>
+    <div class="stack">
+      <div class="opt">As today: 4 changes in this table</div>
+      <img src="/home/devuser/abpdf-options/prototype/options/out/tables-today-rows.png" alt="Today: in row P3 one highlight runs from the Meaning cell across the rule into the Default cell, under connector 1; 190 and P11 share connector 4">
+      <div class="opt pick">One change per cell: 6 changes <span class="tag">my pick</span></div>
+      <img src="/home/devuser/abpdf-options/prototype/options/out/tables-cells-rows.png" alt="Per cell: in row P3 each cell has its own highlight, and connectors 1 and 2 share one band; 190 is change 5 and P11 is change 6">
+    </div>
+    <div class="grid g2" style="margin-top:16px">
+      <div><div class="caption">The listing, as today</div>
+      <pre><span class="rm">- Setting number 3 of the controller 120</span>
+<span class="ad">+ Threshold of the detector 125</span>
+<span class="ad">+ P5a Setting number 5a of the controller 155</span>
+<span class="rm">- P9 Setting number 9 of the controller 180</span>
+<span class="rm">- 190 P11</span>
+<span class="ad">+ 195 Q11</span></pre></div>
+      <div><div class="caption">The listing, per cell</div>
+      <pre><span class="rm">- Setting number 3 of the controller</span>
+<span class="ad">+ Threshold of the detector</span>
+<span class="rm">- 120</span>
+<span class="ad">+ 125</span>
+<span class="ad">+ P5a Setting number 5a of the controller 155</span>
+<span class="rm">- P9 Setting number 9 of the controller 180</span>
+<span class="rm">- 190</span>
+<span class="ad">+ 195</span>
+<span class="rm">- P11</span>
+<span class="ad">+ Q11</span></pre></div>
+    </div>
+    <ul>
+      <li>Today, changed cells that follow each other in reading order are one change. Its highlight crosses the rule between two cells, and its text, <code>190 P11</code>, stands in no cell.</li>
+      <li>Per cell, each cell gets its own number, summary entry and JSON record. Two changes in one row share a connector band, labelled <code>2 1</code> above.</li>
+      <li>Added and removed rows stay one change each, and the added column of the second table (not shown) is one change per cell already.</li>
+      <li>The cells come from the tags of a tagged PDF. An untagged PDF comes out as today.</li>
+      <li>The research notes sketch a heavier scheme: align rows by their first column, then compare cells pairwise. Nothing in these examples needs it.</li>
+    </ul>
+    <div class="pickbox">
+      <b>One change per cell.</b>
+      Nobody wrote <code>190 P11</code>; they wrote <code>190</code> and <code>P11</code>.
+      The price is more entries when several cells of a row change, and that tagged and untagged PDFs of one document report tables differently.
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">3</span>Images and vector drawings</h2>
+    <p class="setup">
+      A graphic becomes a token in the flow, like a word, so it is aligned with the text around it.
+      This is the whole sheet with the option I would build now; the comparison of the options follows.
+    </p>
+    <img src="/home/devuser/abpdf-options/prototype/options/out/figures-grouped-sheet.png" alt="A sheet on which the changed image and the changed bar chart are framed and tinted red on the old page and green on the new page, each with a numbered connector">
+
+    <div class="grid g3" style="margin-top:22px">
+      <div class="opt">As today: text only</div>
+      <div class="opt pick">Graphics kept together <span class="tag">my pick</span></div>
+      <div class="opt">Also loose shapes</div>
+
+      <div class="row">An image whose pixels change</div>
+      <div><div class="cell-label">As today</div><img src="/home/devuser/abpdf-options/prototype/options/out/figures-none-image.png" alt="Not marked"></div>
+      <div><div class="cell-label">Kept together</div><img src="/home/devuser/abpdf-options/prototype/options/out/figures-grouped-image.png" alt="Framed green"></div>
+      <div><div class="cell-label">Also loose shapes</div><img src="/home/devuser/abpdf-options/prototype/options/out/figures-all-image.png" alt="Framed green"></div>
+
+      <div class="row">An included vector file (SVG) in which one bar grows</div>
+      <div><div class="cell-label">As today</div><img src="/home/devuser/abpdf-options/prototype/options/out/figures-none-vector.png" alt="Not marked"></div>
+      <div><div class="cell-label">Kept together</div><img src="/home/devuser/abpdf-options/prototype/options/out/figures-grouped-vector.png" alt="Framed green"></div>
+      <div><div class="cell-label">Also loose shapes</div><img src="/home/devuser/abpdf-options/prototype/options/out/figures-all-vector.png" alt="Framed green"></div>
+
+      <div class="row">A diagram drawn shape by shape: a box is filled and a line is added, and no label changes</div>
+      <div><div class="cell-label">As today</div><img src="/home/devuser/abpdf-options/prototype/options/out/figures-none-diagram.png" alt="Not marked"></div>
+      <div><div class="cell-label">Kept together</div><img src="/home/devuser/abpdf-options/prototype/options/out/figures-grouped-diagram.png" alt="Not marked"></div>
+      <div><div class="cell-label">Also loose shapes</div><img src="/home/devuser/abpdf-options/prototype/options/out/figures-all-diagram.png" alt="Framed green"></div>
+
+      <div class="row">The same kind of diagram: only a label changes</div>
+      <div><div class="cell-label">As today</div><img src="/home/devuser/abpdf-options/prototype/options/out/figures-none-label.png" alt="The label is highlighted"></div>
+      <div><div class="cell-label">Kept together</div><img src="/home/devuser/abpdf-options/prototype/options/out/figures-grouped-label.png" alt="The label is highlighted"></div>
+      <div><div class="cell-label">Also loose shapes</div><img src="/home/devuser/abpdf-options/prototype/options/out/figures-all-label.png" alt="The label is highlighted"></div>
+
+      <div class="row">Graphics that stay as they are</div>
+      <div><div class="cell-label">As today</div><img src="/home/devuser/abpdf-options/prototype/options/out/figures-none-unchanged.png" alt="Not marked"></div>
+      <div><div class="cell-label">Kept together</div><img src="/home/devuser/abpdf-options/prototype/options/out/figures-grouped-unchanged.png" alt="Not marked"></div>
+      <div><div class="cell-label">Also loose shapes</div><img src="/home/devuser/abpdf-options/prototype/options/out/figures-all-unchanged.png" alt="Not marked"></div>
+
+      <div class="row">Highlighted and underlined text that changes</div>
+      <div><div class="cell-label">As today</div><img src="/home/devuser/abpdf-options/prototype/options/out/figures-none-decoration.png" alt="The changed words are highlighted"></div>
+      <div><div class="cell-label">Kept together</div><img src="/home/devuser/abpdf-options/prototype/options/out/figures-grouped-decoration.png" alt="The changed words are highlighted"></div>
+      <div><div class="cell-label">Also loose shapes</div><img src="/home/devuser/abpdf-options/prototype/options/out/figures-all-decoration.png" alt="The whole highlighted phrase is framed as a drawing"></div>
+    </div>
+
+    <table>
+      <tr><th>On the synthetic manual, 307 → 308 pages</th><th>Changes</th><th>What it finds</th></tr>
+      <tr><td>As today</td><td class="n">18</td><td>Misses the image that changes and the diagram box that changes; finds the diagram's new label.</td></tr>
+      <tr><td>Kept together</td><td class="n">19</td><td>Finds the image. Nothing else is added anywhere.</td></tr>
+      <tr><td>Also loose shapes</td><td class="n">21</td><td>Finds the diagram too, as three entries. No false alarm on the pages that do not change.</td></tr>
+    </table>
+
+    <div class="caption" style="margin-top:18px">
+      Loose shapes on the manual: one edited diagram comes out as three entries with overlapping frames, because shapes that do not touch are separate drawings
+    </div>
+    <img style="margin-top:8px" src="/home/devuser/abpdf-options/prototype/options/out/manual-all-diagram.png" alt="A diagram of four labelled boxes at the foot of a page with two overlapping green frames around parts of it">
+
+    <ul>
+      <li><b>Kept together</b> means an image, a form object (a drawing that the PDF stores as one unit), or the shapes of one tagged figure. Without tags, images are still compared, and the SVG that Typst draws inline falls apart into loose shapes.</li>
+      <li><b>Loose shapes</b> are everything else that is drawn. Typst marks a diagram's shapes exactly as it marks table rules and underlines, and nothing says which shapes belong together. The prototype groups shapes that touch and drops groups made only of rules.</li>
+      <li>That grouping has two faults that show above: a highlighter's rectangle counts as a drawing, and one diagram can come apart into several.</li>
+      <li>Only Typst output was tried. I have not run a PDF from LaTeX or Word through either option, so form objects are untested.</li>
+    </ul>
+    <div class="pickbox">
+      <b>Graphics kept together now; loose shapes as a step of their own.</b>
+      The first added nothing but the one true change on 300 pages, and closes a gap the design notes name: an image is not reported, only its caption.
+      The second also finds true changes, but what counts as one drawing still has to be designed, and the design notes already list it as the noisy part.
+    </div>
+  </section>
+</div>

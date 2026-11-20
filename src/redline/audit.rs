@@ -51,17 +51,25 @@ fn marks_on(flow: &Flow, page_index: usize) -> Vec<Mark> {
     let mut marks: Vec<Mark> = Vec::new();
     // The line and the rule of the last mark.
     let mut last = None;
+    let splits_around_left_out_text = crate::prototype::splits_around_left_out_text();
+    let mut last_raw_end = 0;
     for excluded in &flow.excluded {
+        let follows_as_read = excluded.token.raw_indices.start <= last_raw_end;
+        last_raw_end = excluded.token.raw_indices.end;
         let fragments = excluded.token.fragments.iter();
         for fragment in fragments.filter(|fragment| fragment.page_index == page_index) {
             let line_and_rule = (fragment.line_index, excluded.exclusion);
             let bounds = fragment.bounds;
+            let is_close = match splits_around_left_out_text {
+                true => follows_as_read,
+                false => {
+                    marks.last().is_some_and(|mark| {
+                        bounds.left - mark.bounds.right <= MAX_GAP_IN_OUTLINE * bounds.height()
+                    })
+                }
+            };
             match marks.last_mut() {
-                Some(mark)
-                    if last == Some(line_and_rule)
-                        && bounds.left - mark.bounds.right
-                            <= MAX_GAP_IN_OUTLINE * bounds.height() =>
-                {
+                Some(mark) if last == Some(line_and_rule) && is_close => {
                     mark.bounds = mark.bounds.union(&bounds);
                 }
                 _ => marks.push(Mark {

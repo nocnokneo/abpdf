@@ -99,6 +99,7 @@ impl PageTokenizer<'_> {
                     self.gap = Gap::LineBreak;
                     self.line_index += 1;
                 }
+                TextItem::Figure(index) => self.add_figure(*index),
             }
         }
         self.end_run(None);
@@ -134,6 +135,27 @@ impl PageTokenizer<'_> {
         }
         self.trailing_soft_hyphen = None;
         self.run.push(*character);
+    }
+
+    /// PROTOTYPE: a graphic is a token on a line of its own.
+    fn add_figure(&mut self, index: usize) {
+        self.end_run(None);
+        if self.gap != Gap::LineBreak {
+            self.line_index += 1;
+        }
+        let figure = &self.page.figures[index];
+        self.builder.tokens.push(RawToken {
+            text: format!("[{}]", figure.description),
+            fragment: self.fragment(figure.bounds),
+            gap: Gap::LineBreak,
+            styles: Vec::new(),
+            is_artifact: figure.is_artifact,
+            cell: None,
+            figure: Some(figure.fingerprint),
+            line_end_hyphen: None,
+        });
+        self.line_index += 1;
+        self.gap = Gap::LineBreak;
     }
 
     /// Turns the run into tokens.
@@ -180,6 +202,10 @@ impl PageTokenizer<'_> {
             gap: mem::replace(&mut self.gap, Gap::None),
             styles,
             is_artifact: self.page.spans[first.span].is_artifact,
+            cell: self.page.spans[first.span]
+                .cell
+                .map(|cell| (self.page_index, cell)),
+            figure: None,
             line_end_hyphen: None,
         });
     }

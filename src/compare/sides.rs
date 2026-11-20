@@ -102,14 +102,23 @@ fn text_of(tokens: &[&Token]) -> String {
 /// Tokens that other tokens of the flow stand between are not merged, so
 /// that an area does not cover those.
 fn areas_of<'a>(tokens: impl IntoIterator<Item = (usize, &'a Token)>) -> Vec<Area> {
+    let splits_around_left_out_text = crate::prototype::splits_around_left_out_text();
     let mut areas: Vec<Area> = Vec::new();
     // The index and the line of the fragment before.
     let mut last = None;
+    // PROTOTYPE: where the token after the last one stands as it is read.
+    let mut last_raw_end = 0;
     for (index, token) in tokens {
+        let follows_as_read = token.raw_indices.start <= last_raw_end;
+        last_raw_end = token.raw_indices.end;
         for fragment in &token.fragments {
             let line = (fragment.page_index, fragment.line_index);
             let continues_last = last.is_some_and(|(last_index, last_line)| {
-                last_line == line && index <= last_index + 1
+                let follows = match splits_around_left_out_text {
+                    true => follows_as_read,
+                    false => index <= last_index + 1,
+                };
+                last_line == line && follows
             });
             match areas.last_mut() {
                 Some(area) if continues_last => {
@@ -118,6 +127,7 @@ fn areas_of<'a>(tokens: impl IntoIterator<Item = (usize, &'a Token)>) -> Vec<Are
                 _ => areas.push(Area {
                     page_index: fragment.page_index,
                     bounds: fragment.bounds,
+                    is_figure: token.figure.is_some(),
                 }),
             }
             last = Some((index, line));
@@ -141,6 +151,7 @@ fn insertion_point(
     let after_previous = previous.map(|token| {
         let fragment = token.fragments.last().expect("a token has a fragment");
         Area {
+            is_figure: false,
             page_index: fragment.page_index,
             bounds: Rect {
                 left: fragment.bounds.right,
@@ -151,6 +162,7 @@ fn insertion_point(
     let before_next = sequence.tokens.get(position).map(|token| {
         let fragment = token.fragments[0];
         Area {
+            is_figure: false,
             page_index: fragment.page_index,
             bounds: Rect {
                 right: fragment.bounds.left,

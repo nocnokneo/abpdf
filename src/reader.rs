@@ -41,6 +41,19 @@ pub struct Page {
     pub spans: Vec<Span>,
     /// The text in reading order.
     pub text: Vec<TextItem>,
+    /// PROTOTYPE: the graphics that [`TextItem::Figure`] refers to.
+    pub figures: Vec<Figure>,
+}
+
+/// PROTOTYPE: a graphic of a page.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Figure {
+    pub bounds: Rect,
+    /// What a reader is told the graphic is.
+    pub description: String,
+    /// The same for two graphics that look the same.
+    pub fingerprint: u64,
+    pub is_artifact: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -49,6 +62,8 @@ pub enum TextItem {
     /// White space within a line.
     Space,
     LineBreak,
+    /// PROTOTYPE: a graphic, as an index into [`Page::figures`].
+    Figure(usize),
 }
 
 /// What a run of consecutive characters has in common.
@@ -62,6 +77,9 @@ pub struct Span {
     /// first and separated by `/`, such as `Document/Table/TBody/TR/TD`.
     /// `None` when the run is not part of the structure tree.
     pub structure_path: Option<String>,
+    /// PROTOTYPE: the number on its page of the table cell that contains the
+    /// run.
+    pub cell: Option<usize>,
     /// The text the producer says the run stands for, when that is not what
     /// its glyphs map to.
     pub actual_text: Option<String>,

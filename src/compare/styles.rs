@@ -55,6 +55,10 @@ pub(super) fn restyled(
 /// compared with the rest of the other's.
 fn differences_at(positions: BySide<usize>, sequences: &BySide<Sequence>) -> Vec<StyleDifference> {
     let tokens = BySide::from_fn(|side| sequences[side].tokens[positions[side]]);
+    // PROTOTYPE: a graphic has no style.
+    if tokens.old.styles.is_empty() || tokens.new.styles.is_empty() {
+        return Vec::new();
+    }
     let style = |side, run: usize| {
         let token: &Token = tokens[side];
         let run = run.min(token.styles.len() - 1);

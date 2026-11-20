@@ -23,6 +23,7 @@ pub mod geometry;
 pub mod json;
 pub mod listing;
 pub mod profile;
+pub mod prototype;
 pub mod reader;
 pub mod redline;
 mod side;

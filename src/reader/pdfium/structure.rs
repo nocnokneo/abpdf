@@ -43,3 +43,40 @@ fn collect(
         collect(&child, &path, depth + 1, paths);
     }
 }
+
+/// PROTOTYPE: the number of the table cell that each piece of marked content
+/// on `page` is in, by its marked content identifier.
+pub(super) fn cells_by_marked_content_id(page: &LoadedPage) -> HashMap<c_int, usize> {
+    let mut cells = HashMap::new();
+    let mut cell_count = 0;
+    if let Some(tree) = page.structure_tree() {
+        for element in tree.children() {
+            collect_cells(&element, None, 0, &mut cell_count, &mut cells);
+        }
+    }
+    cells
+}
+
+fn collect_cells(
+    element: &StructureElement,
+    mut cell: Option<usize>,
+    depth: usize,
+    cell_count: &mut usize,
+    cells: &mut HashMap<c_int, usize>,
+) {
+    if depth > MAX_DEPTH {
+        return;
+    }
+    if matches!(element.type_name().as_str(), "TD" | "TH") {
+        cell = Some(*cell_count);
+        *cell_count += 1;
+    }
+    if let Some(cell) = cell {
+        for id in element.marked_content_ids() {
+            cells.entry(id).or_insert(cell);
+        }
+    }
+    for child in element.children() {
+        collect_cells(&child, cell, depth + 1, cell_count, cells);
+    }
+}
