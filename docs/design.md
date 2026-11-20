@@ -141,12 +141,12 @@ flowchart LR
 ```
 
 The change model is the hub.
-It lists each change with its kind (insert, delete, replace, move, style, image, drawing), the text on each side, and the pages and rectangles it covers.
+It lists each change with its kind (insert, delete, replace, move, style), the text on each side, in which a figure reads as what it is, and the pages and rectangles it covers.
 Every output is rendered from it, and tests assert on it.
 
 Tokens:
 
-- A token is a word, a punctuation mark, or a figure (an image or a cluster of vector drawing treated as one unit).
+- A token is a word, a punctuation mark, or a figure (an image, or a drawing that is treated as one unit).
 - Each token keeps its page, its rectangles and its style, and a normalized key used for comparison: ligatures folded, invisible characters removed, words broken at line ends rejoined.
 - A filtered token stays in the model, marked with the rule that excluded it, which is what the audit overlay draws.
 
@@ -156,7 +156,7 @@ Diff:
 - Cleanup that merges coincidental matches of a word or two inside a rewritten passage into one replacement.
 - Moved blocks found by matching removed runs against added runs, allowing small differences.
 - Character-level refinement inside short replacements.
-- A figure is compared by identity first (same image data), then by rendering both and comparing pixels.
+- A figure is compared by what it is drawn with, which is its key, and then by the points it is drawn through, which are measured from the first of them so that its place on the page does not matter.
 
 Sheets:
 
@@ -207,8 +207,21 @@ The reader sits behind an interface from the start so that a second implementati
    Filtered tokens have a list of their own next to the compared ones.
    What a page repeats at its top is left out for its place and not for what it says, which also covers a running header that is the same on every page, but no footer.
 4. Figures, images and style changes; table cells; detection of headers and footers in untagged documents.
-   The flow takes up style and structure again here: the reader reports both, and nothing compares them yet.
-5. `hayro` reader; release archives; packaging.
+   Done: the revisions of the synthetic manual differ by 19 changes, which are the 16 edits to their text, two to its style and an image with other pixels.
+   - A header or a footer that nothing marks is found by its place, as a line at the top or the bottom of a page that a page nearby has too, so the untagged test corpus needs no heights in its profile.
+   - Style is compared where the diff leaves text matched.
+   - A figure is a token: an image, a form, or the shapes that the tag of one figure holds.
+     Its points are compared apart from its key and with a tolerance, because a producer does not write a figure at another place on the page with the same numbers.
+     Nothing is rendered.
+   - A hunk of the diff is cut into the changes that it holds: around its figures, and from one table cell to the next where tags tell the cells apart.
+   - A token knows where it stands among the tokens as they are read, so the area of a change ends where text that is left out stands in it.
+   - Text in a form belongs to what is around the form: the marked content inside an included PDF is numbered apart from that of the page.
+   - A page that its producer draws through one form reads as one figure with all of its shapes.
+5. Drawings of loose shapes: the shapes that a page draws one by one, which is how a diagram arrives that is made with the drawing commands of Typst.
+   What one drawing is has to be settled first.
+   Taking shapes that touch for one drawing finds the diagram box that changes in the synthetic manual, as three changes because the diagram has gaps, and takes the box behind highlighted text for a drawing.
+   It comes before a second reader, which has to report whatever a figure is.
+6. `hayro` reader; release archives; packaging.
    The reader interface passes on PDFium's marker for a hyphen that ends a line inside a word, which a second reader should not have to imitate: finding those hyphens moves to the flow.
    Ignore patterns then see such a word as it is printed.
    Today `well-` and `known` on two lines read as `wellknown`, which the pattern `well-known` misses.
