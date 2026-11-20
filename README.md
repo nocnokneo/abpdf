@@ -135,6 +135,8 @@ ignore_patterns = [
 - A pattern is searched in the text of each page, in which the lines of the page are separated by a newline.
 - If a pattern has capture groups, only what the groups capture is ignored, and the rest of the match only says where to look.
 - A word is ignored as a whole even if only part of it is matched.
+- A word that a line break splits is searched as one word with its hyphen, such as `well-known`.
+  The hyphen is left out only where the PDF marks it as no part of the word.
 - The syntax is that of the [regex](https://docs.rs/regex/latest/regex/#syntax) crate.
 
 ### JSON

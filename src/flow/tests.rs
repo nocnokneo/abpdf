@@ -235,9 +235,34 @@ fn hyphen_of_unknown_kind_joins_the_word() {
 }
 
 #[test]
-fn hyphen_of_unknown_kind_before_punctuation_stays_in_the_text() {
+fn hyphen_at_a_line_end_breaks_no_word_unless_a_word_goes_on_after_it() {
     let page = PageBuilder::new().text("pre").line_end_hyphen().text("(x)");
-    assert_eq!(texts(&flow_of([page])), ["pre", "-", "(", "x", ")"]);
+    let flow = flow_of([page]);
+    assert_eq!(texts(&flow), ["pre", "-", "(", "x", ")"]);
+    assert_eq!(flow.tokens[2].gap, Gap::LineBreak);
+}
+
+#[test]
+fn hyphen_at_a_line_end_breaks_no_word_unless_it_follows_a_letter() {
+    let page = PageBuilder::new()
+        .text("from 3")
+        .line_end_hyphen()
+        .text("to");
+    let flow = flow_of([page]);
+    assert_eq!(texts(&flow), ["from", "3", "-", "to"]);
+    assert_eq!(flow.tokens[3].gap, Gap::LineBreak);
+}
+
+#[test]
+fn hyphen_inside_a_line_breaks_no_word() {
+    let flow = flow_of([PageBuilder::new().text("inter-national")]);
+    assert_eq!(texts(&flow), ["inter", "-", "national"]);
+}
+
+#[test]
+fn word_joins_over_white_space_between_its_hyphen_and_the_end_of_the_line() {
+    let page = PageBuilder::new().text("inter- \nnational");
+    assert_eq!(texts(&flow_of([page])), ["international"]);
 }
 
 #[test]

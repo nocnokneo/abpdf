@@ -228,6 +228,6 @@ The reader sits behind an interface from the start so that a second implementati
      PDFium does not report the type of an artifact, which is a name.
    - The rules take plain data and know no engine: a second reader has to bring them the bounds of the shapes and the middles and table cells of the texts.
 6. `hayro` reader; release archives; packaging.
-   The reader interface passes on PDFium's marker for a hyphen that ends a line inside a word, which a second reader should not have to imitate: finding those hyphens moves to the flow.
-   Ignore patterns then see such a word as it is printed.
-   Today `well-` and `known` on two lines read as `wellknown`, which the pattern `well-known` misses.
+   Done so far: an engine reports text as it is printed, and the flow finds the hyphens that end a line inside a word, so a second reader has no marker of PDFium's to imitate.
+   - The flow also takes a hyphen at the end of a page for one, which PDFium does not, because it reads a page at a time.
+   - Ignore patterns see a word that a line break splits as one word with its hyphen, as `well-known`, and without it only where the producer marks the hyphen as no part of the word.

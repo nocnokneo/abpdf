@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use regex::Regex;
 
-use crate::flow::{Exclusion, Gap, RawFlow, RawToken};
+use crate::flow::{Exclusion, Gap, HyphenKind, RawFlow, RawToken};
 
 /// What to leave out of a comparison, besides what the producer marked as
 /// artifacts.
@@ -104,18 +104,28 @@ struct PageText {
 }
 
 impl PageText {
+    /// The text as it is printed, with a newline between two lines.
+    ///
+    /// A word that a line break splits is one word in it, with its hyphen,
+    /// so that a pattern for `well-known` finds the word where it breaks.
+    /// Only a hyphen that the producer marks as one that is no part of the
+    /// word is left out.
     fn of(tokens: &[RawToken]) -> Self {
         let mut text = String::new();
         let mut token_ranges = Vec::with_capacity(tokens.len());
+        let mut hyphen_before: Option<HyphenKind> = None;
         for (index, token) in tokens.iter().enumerate() {
-            match token.gap {
+            match (hyphen_before, token.gap) {
                 _ if index == 0 => {}
-                Gap::None => {}
-                Gap::Space => text.push(' '),
-                Gap::LineBreak => text.push('\n'),
+                (Some(HyphenKind::Soft), _) => {}
+                (Some(HyphenKind::Hard | HyphenKind::Unknown), _) => text.push('-'),
+                (None, Gap::None) => {}
+                (None, Gap::Space) => text.push(' '),
+                (None, Gap::LineBreak) => text.push('\n'),
             }
             token_ranges.push(text.len()..text.len() + token.text.len());
             text.push_str(&token.text);
+            hyphen_before = token.line_end_hyphen.map(|hyphen| hyphen.kind);
         }
         Self { text, token_ranges }
     }
@@ -160,6 +170,44 @@ mod tests {
                 .collect(),
             ..Filters::default()
         }
+    }
+
+    /// A page on which a line break splits a word after `first_part`, at a
+    /// hyphen in the span that `hyphen_span` starts.
+    fn page_with_broken_word(
+        first_part: &str,
+        hyphen_span: impl FnOnce(PageBuilder) -> PageBuilder,
+        second_part: &str,
+    ) -> PageBuilder {
+        let page = PageBuilder::new().text(&format!("a {first_part}"));
+        hyphen_span(page)
+            .line_end_hyphen()
+            .body()
+            .text(&format!("{second_part} b"))
+    }
+
+    #[test]
+    fn pattern_finds_a_word_with_its_hyphen_where_a_line_break_splits_it() {
+        let page = || page_with_broken_word("well", PageBuilder::body, "known");
+        assert_eq!(compared([page()], &ignoring(&["well-known"])), ["a", "b"]);
+        assert_eq!(
+            compared([page()], &ignoring(&["wellknown"])),
+            ["a", "well", "known", "b"]
+        );
+    }
+
+    #[test]
+    fn pattern_finds_a_word_without_the_hyphen_that_is_marked_as_no_part_of_it() {
+        let soft = |page: PageBuilder| page.actual_text("\u{AD}");
+        let page = || page_with_broken_word("inter", soft, "national");
+        assert_eq!(
+            compared([page()], &ignoring(&["international"])),
+            ["a", "b"]
+        );
+        assert_eq!(
+            compared([page()], &ignoring(&["inter-national"])),
+            ["a", "inter", "national", "b"]
+        );
     }
 
     #[test]
