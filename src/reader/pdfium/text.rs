@@ -3,7 +3,8 @@
 use std::collections::HashMap;
 use std::ffi::c_int;
 
-use super::handles::{LoadedPage, TextObject, TextPage};
+use super::handles::{LoadedPage, PageObject, TextPage};
+use super::objects::PageObjects;
 use super::page_space::PageSpace;
 use super::structure::Structure;
 use crate::reader::{Char, Span, Style, TextItem};
@@ -16,20 +17,30 @@ const ITALIC_FONT_FLAG: c_int = 1 << 6;
 
 const REPLACEMENT_CHARACTER: char = '\u{FFFD}';
 
-/// The spans and the text of a page.
+/// The spans and the text of a page, with its figures where they stand in
+/// the text.
+///
 /// `structures` has the structure of marked content by its identifier.
+/// `figure_objects` has, for each figure of the page in the order in which
+/// they are drawn, the index among `objects` of the first object that draws
+/// it.
 pub(super) fn read(
     page: &LoadedPage,
     page_space: &PageSpace,
     structures: &HashMap<c_int, Structure>,
+    objects: &PageObjects,
+    figure_objects: &[usize],
 ) -> (Vec<Span>, Vec<TextItem>) {
     let Some(text_page) = page.text() else {
-        return (Vec::new(), Vec::new());
+        let figures = (0..figure_objects.len()).map(TextItem::Figure);
+        return (Vec::new(), figures.collect());
     };
     let mut reader = TextReader {
         text_page: &text_page,
         page_space,
         structures,
+        objects,
+        figure_objects,
         spans: Vec::new(),
         span_by_object: HashMap::new(),
     };
@@ -41,6 +52,8 @@ struct TextReader<'a> {
     text_page: &'a TextPage<'a>,
     page_space: &'a PageSpace,
     structures: &'a HashMap<c_int, Structure>,
+    objects: &'a PageObjects<'a>,
+    figure_objects: &'a [usize],
     spans: Vec<Span>,
     /// The span of each text object by its identity, and of the characters
     /// that no object draws under `None`.
@@ -51,13 +64,34 @@ impl TextReader<'_> {
     fn read_items(&mut self) -> Vec<TextItem> {
         let count = self.text_page.char_count();
         let mut items = Vec::with_capacity(count as usize);
+        // How many of the figures stand in the text so far.
+        let mut placed_figure_count = 0;
         let mut index = 0;
         while index < count {
             let (code, code_unit_count) = self.read_code_point(index);
-            items.extend(self.read_item(index, code));
+            let item = self.read_item(index, code);
+            if let Some(TextItem::Char(_)) = item {
+                let figure_count = self.figure_count_before(index);
+                items.extend((placed_figure_count..figure_count).map(TextItem::Figure));
+                placed_figure_count = placed_figure_count.max(figure_count);
+            }
+            items.extend(item);
             index += code_unit_count;
         }
+        items.extend((placed_figure_count..self.figure_objects.len()).map(TextItem::Figure));
         items
+    }
+
+    /// How many of the figures stand before a character: those that the
+    /// page starts to draw before the object of the character or with it,
+    /// which is how a form draws the text inside it.
+    fn figure_count_before(&self, index: c_int) -> usize {
+        let object = self.text_page.text_object(index);
+        let Some(object_index) = object.and_then(|object| self.objects.index_of(&object)) else {
+            return 0;
+        };
+        self.figure_objects
+            .partition_point(|first_object| *first_object <= object_index)
     }
 
     /// The code point at `index`, and how many of PDFium's characters it takes.
@@ -108,7 +142,7 @@ impl TextReader<'_> {
         self.spans.len() - 1
     }
 
-    fn read_span(&self, index: c_int, object: Option<TextObject>) -> Span {
+    fn read_span(&self, index: c_int, object: Option<PageObject>) -> Span {
         let mut span = Span {
             style: self.read_style(index),
             is_artifact: false,
@@ -119,12 +153,17 @@ impl TextReader<'_> {
         let Some(object) = object else {
             return span;
         };
-        for mark in object.marks() {
+        // What is around a form is around the text in it, and is what ties
+        // that text to the structure tree: the marked content inside a form
+        // is numbered apart from that of the page.
+        let form = self.objects.form_around(&object);
+        let marks_around_form = form.into_iter().flat_map(PageObject::marks);
+        for mark in marks_around_form.chain(object.marks()) {
             span.is_artifact |= mark.name().as_deref() == Some("Artifact");
             // An inner mark, which comes later, overrides an outer one.
             span.actual_text = mark.text_property("ActualText").or(span.actual_text);
         }
-        let id = object.marked_content_id();
+        let id = form.unwrap_or(&object).marked_content_id();
         if let Some(structure) = id.and_then(|id| self.structures.get(&id)) {
             span.structure_path = Some(structure.path.clone());
             span.cell = structure.cell;

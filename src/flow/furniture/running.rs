@@ -3,7 +3,7 @@
 //! same words, where a number may count the pages.
 
 use super::{Compared, Line};
-use crate::flow::{Exclusion, key_of};
+use crate::flow::Exclusion;
 
 /// How many pages away the same header or footer is looked for: two, because
 /// left and right pages can each have their own.
@@ -110,7 +110,7 @@ impl<'a> PagesFromEdge<'a> {
         let other_tokens = self.compared.tokens_of(other);
         tokens.len() == other_tokens.len()
             && tokens.iter().zip(other_tokens).all(|(token, other_token)| {
-                key_of(&token.text) == key_of(&other_token.text)
+                token.key() == other_token.key()
                     || counts_on(&token.text, &other_token.text, pages_on)
             })
     }

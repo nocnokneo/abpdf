@@ -115,7 +115,11 @@ pub struct Mark {
 pub enum MarkStyle {
     /// Tints what is under it, as a highlighter pen does.
     Highlight,
+    /// A thin line around text.
     Outline,
+    /// A thick line around a figure, which shows on a picture where a tint
+    /// is hard to see.
+    Border,
     /// A line down the left edge, to mark a place between two characters.
     Caret,
 }

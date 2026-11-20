@@ -5,9 +5,10 @@ use std::mem;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::hyphen_marks::{self, HyphenMarks};
-use super::{Cell, Fragment, Gap, HyphenKind, LineEndHyphen, RawFlow, RawToken};
+use super::{Cell, FIGURE_TEXT, Figure, Fragment, Gap, HyphenKind, LineEndHyphen};
+use super::{RawFlow, RawToken};
 use crate::geometry::{Rect, Size};
-use crate::reader::{Char, Page, Style, TextItem};
+use crate::reader::{self, Char, Page, Style, TextItem};
 
 const SOFT_HYPHEN: char = '\u{AD}';
 
@@ -99,6 +100,7 @@ impl PageTokenizer<'_> {
                     self.gap = Gap::LineBreak;
                     self.line_index += 1;
                 }
+                TextItem::Figure(index) => self.add_figure(&self.page.figures[*index]),
             }
         }
         self.end_run(None);
@@ -134,6 +136,26 @@ impl PageTokenizer<'_> {
         }
         self.trailing_soft_hyphen = None;
         self.run.push(*character);
+    }
+
+    /// Makes a figure a token, on a line of its own.
+    fn add_figure(&mut self, figure: &reader::Figure) {
+        self.end_run(None);
+        if self.gap != Gap::LineBreak {
+            self.line_index += 1;
+        }
+        self.builder.tokens.push(RawToken {
+            text: FIGURE_TEXT.to_owned(),
+            figure: Some(Figure::of(figure)),
+            fragment: self.fragment(figure.bounds),
+            gap: Gap::LineBreak,
+            styles: Vec::new(),
+            is_artifact: figure.is_artifact,
+            cell: None,
+            line_end_hyphen: None,
+        });
+        self.gap = Gap::LineBreak;
+        self.line_index += 1;
     }
 
     /// Turns the run into tokens.
@@ -176,6 +198,7 @@ impl PageTokenizer<'_> {
         styles.dedup();
         self.builder.tokens.push(RawToken {
             text: text.to_owned(),
+            figure: None,
             fragment: self.fragment(bounds),
             gap: mem::replace(&mut self.gap, Gap::None),
             styles,

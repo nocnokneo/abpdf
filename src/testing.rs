@@ -7,7 +7,7 @@ use crate::change::{Comparison, StyleDifference};
 use crate::filter::Filters;
 use crate::flow::{Flow, FlowBuilder, RawFlow};
 use crate::geometry::{Rect, Size};
-use crate::reader::{Char, Color, Page, Span, Style, TextItem};
+use crate::reader::{Char, Color, Figure, FigureKind, Page, Span, Style, TextItem};
 
 pub(crate) const CELL_WIDTH: f32 = 10.0;
 pub(crate) const CELL_HEIGHT: f32 = 12.0;
@@ -18,6 +18,11 @@ pub(crate) const PARAGRAPH: &str = "this paragraph stands somewhere else now";
 /// Ten tokens, so more than the paragraph, which a diff therefore takes for
 /// the text that stays in place where the two change places.
 pub(crate) const REST: &str = "all the other text of the document stays in place";
+
+/// How many cells of a line a figure of a test page takes.
+pub(crate) const FIGURE_COLUMN_COUNT: usize = 5;
+/// What a change says in the place of a figure of a test page.
+pub(crate) const FIGURE_WORDS: &str = "[image, 4 × 3 pixels]";
 
 pub(crate) const BODY_WEIGHT: u16 = 400;
 pub(crate) const BOLD_WEIGHT: u16 = 700;
@@ -38,6 +43,7 @@ impl PageBuilder {
                     height: 800.0,
                 },
                 spans: vec![body_span()],
+                figures: Vec::new(),
                 text: Vec::new(),
             },
             column: 0,
@@ -102,6 +108,40 @@ impl PageBuilder {
 
     pub(crate) fn actual_text(self, actual_text: &str) -> Self {
         self.span(|span| span.actual_text = Some(actual_text.to_owned()))
+    }
+
+    /// Adds a figure where the next character would be: an image that is
+    /// [`FIGURE_COLUMN_COUNT`] cells wide, and differs from the image that
+    /// this adds elsewhere as `change` says.
+    pub(crate) fn figure(mut self, change: impl FnOnce(&mut Figure)) -> Self {
+        let columns = self.column..self.column + FIGURE_COLUMN_COUNT;
+        let bounds = cell_bounds(self.line, columns);
+        let mut figure = Figure {
+            bounds,
+            kind: FigureKind::Image {
+                pixel_width: 4,
+                pixel_height: 3,
+            },
+            is_artifact: false,
+            content_hash: 0,
+            points: vec![
+                (bounds.left, bounds.top),
+                (bounds.right, bounds.top),
+                (bounds.right, bounds.bottom),
+                (bounds.left, bounds.bottom),
+            ],
+        };
+        change(&mut figure);
+        self.page.figures.push(figure);
+        let index = self.page.figures.len() - 1;
+        self.page.text.push(TextItem::Figure(index));
+        self.column += FIGURE_COLUMN_COUNT;
+        self
+    }
+
+    /// Adds the figure that [`Self::figure`] adds unchanged.
+    pub(crate) fn image(self) -> Self {
+        self.figure(|_| {})
     }
 
     /// Adds a hyphen that ends the line inside a word, the way a reader
@@ -212,6 +252,12 @@ pub(crate) fn page_with_bold(text: &str) -> PageBuilder {
         page = page.text(part);
     }
     page
+}
+
+/// A page with a line of text and under it a figure, which differs from
+/// that of [`PageBuilder::image`] as `change` says.
+pub(crate) fn page_with_figure(change: impl FnOnce(&mut Figure)) -> PageBuilder {
+    PageBuilder::new().text("one\n").figure(change)
 }
 
 /// What differs in the style of text that [`page_with_bold`] makes bold.

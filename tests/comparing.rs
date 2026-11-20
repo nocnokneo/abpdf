@@ -8,6 +8,7 @@ use abpdf::change::{ChangeKind, ChangeSide, Comparison};
 use abpdf::filter::Filters;
 use abpdf::flow::Exclusion;
 use abpdf::profile::Profile;
+use abpdf::redline::MarkStyle;
 use abpdf::{BySide, Side};
 
 use common::page_texts;
@@ -71,6 +72,31 @@ const EDITS: [Edit<'static>; REVISIONS_CHANGE_COUNT] = [
     (Replaced, "dry", "cool"),
 ];
 
+/// What a change says in the place of the figures of
+/// `tests/corpus/figures.typ`: its image, its chart and the drawing that it
+/// includes as a PDF.
+const SENSOR: &str = "[image, 24 × 16 pixels]";
+const CHART: &str = "[drawing, 5 parts]";
+const INCLUDED_DRAWING: &str = "[drawing, 3 parts]";
+
+/// What the edits in that source have to be reported as where the
+/// revisions are tagged.
+const FIGURE_EDITS: [Edit<'static>; 5] = [
+    (
+        Inserted,
+        "",
+        "The figures of this revision stand lower on the page than those of the first one.",
+    ),
+    (Replaced, SENSOR, SENSOR),
+    (Replaced, CHART, CHART),
+    (Replaced, INCLUDED_DRAWING, INCLUDED_DRAWING),
+    (
+        Inserted,
+        "",
+        "[image, 24 × 16 pixels] Figure 6: The sensor of the second revision",
+    ),
+];
+
 /// What the edits have to be reported as without tags, which leaves the two
 /// cells that change next to each other one change.
 fn edits_without_tags() -> Vec<Edit<'static>> {
@@ -91,6 +117,11 @@ fn edits_without_tags() -> Vec<Edit<'static>> {
 /// The old and the new revision, with or without tags.
 fn revisions(tagging: &str) -> BySide<Arc<Vec<u8>>> {
     BySide::from_fn(|side| corpus(&format!("revisions-{side}-{tagging}.pdf")))
+}
+
+/// The old and the new revision of the figures, with or without tags.
+fn figures(tagging: &str) -> BySide<Arc<Vec<u8>>> {
+    BySide::from_fn(|side| corpus(&format!("figures-{side}-{tagging}.pdf")))
 }
 
 fn profile() -> Profile {
@@ -125,6 +156,30 @@ fn revisions_differ_by_their_edits() {
 }
 
 #[test]
+fn figures_differ_by_their_edits() {
+    let tagged = compare(figures("tagged"), &Filters::default());
+    assert_eq!(summaries(&tagged), FIGURE_EDITS);
+    // Without tags nothing keeps the shapes of the chart together.
+    let untagged = compare(figures("untagged"), &Filters::default());
+    let edits = FIGURE_EDITS.into_iter();
+    let without_chart: Vec<Edit> = edits.filter(|edit| edit.1 != CHART).collect();
+    assert_eq!(summaries(&untagged), without_chart);
+}
+
+#[test]
+fn figure_that_changes_gets_a_border_on_both_pages() {
+    let (_, redline, _) = compare_and_redline(figures("tagged"), &Filters::default());
+    let border_count = |side: Side| {
+        let page = redline.sheets[0].pages[side].as_ref().expect("a page");
+        let marks = page.marks.iter();
+        marks.filter(|mark| mark.style == MarkStyle::Border).count()
+    };
+    // Three figures change, and the new revision has one more.
+    assert_eq!(border_count(Side::Old), 3);
+    assert_eq!(border_count(Side::New), 4);
+}
+
+#[test]
 fn table_header_that_a_page_break_repeats_is_left_out_without_tags() {
     // The table breaks one row later in the new revision, and without tags
     // nothing but its place says that the header after the break is a repeat.
@@ -150,8 +205,10 @@ fn numbers_that_follow_from_the_edits_are_reported_without_a_profile() {
 #[test]
 fn document_does_not_differ_from_itself() {
     for tagging in ["tagged", "untagged"] {
-        let comparison = compare(both(revisions(tagging).new), &Filters::default());
-        assert_eq!(comparison.changes, []);
+        for pdfs in [revisions(tagging), figures(tagging)] {
+            let comparison = compare(both(pdfs.new), &Filters::default());
+            assert_eq!(comparison.changes, [], "{tagging}");
+        }
     }
 }
 

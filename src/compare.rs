@@ -1,8 +1,9 @@
 //! Comparing two documents: from what they read as to a [`Comparison`].
 
-mod cells;
+mod figures;
 mod moves;
 mod partners;
+mod pieces;
 mod sequence;
 mod sides;
 mod styles;
@@ -65,8 +66,9 @@ impl Comparison {
 type Place = (usize, usize);
 
 /// The changes in the ranges `within` of two sequences, of which `hunks` are
-/// a diff: what differs at each hunk, table cell by table cell, and the
-/// styles that differ in the text that the hunks leave matched.
+/// a diff: what differs at each hunk, piece by piece, and what the hunks
+/// leave matched that does not look the same, which is text in another style
+/// and a figure that is drawn differently.
 fn changes_within(
     within: &BySide<Range<usize>>,
     hunks: &[Hunk],
@@ -79,7 +81,7 @@ fn changes_within(
     };
     let mut changes = Vec::new();
     for hunk in hunks {
-        for piece in cells::split(hunk, sequences) {
+        for piece in pieces::split(hunk, sequences) {
             let change = sides::change_at(&piece, sequences, page_partners);
             changes.push((place_of(&piece), change));
         }
@@ -87,6 +89,10 @@ fn changes_within(
     for matched in diff::matches(hunks, within) {
         for (positions, change) in styles::restyled(&matched, sequences) {
             changes.push((place_of(&positions), change));
+        }
+        for figure in figures::redrawn(&matched, sequences) {
+            let change = sides::change_at(&figure, sequences, page_partners);
+            changes.push((place_of(&figure), change));
         }
     }
     changes

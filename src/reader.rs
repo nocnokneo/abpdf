@@ -33,13 +33,15 @@ pub enum ReadError {
     InvalidPage { page_number: usize },
 }
 
-/// The text of one page.
+/// The text and the figures of one page.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Page {
     pub size: Size,
     /// The runs that [`Char::span`] refers to.
     pub spans: Vec<Span>,
-    /// The text in reading order.
+    /// The figures that [`TextItem::Figure`] refers to.
+    pub figures: Vec<Figure>,
+    /// The text in reading order, with the figures where they stand in it.
     pub text: Vec<TextItem>,
 }
 
@@ -49,6 +51,53 @@ pub enum TextItem {
     /// White space within a line.
     Space,
     LineBreak,
+    /// A figure, as its index in [`Page::figures`].
+    /// It stands before the first character that is drawn after it or in
+    /// it.
+    Figure(usize),
+}
+
+/// A picture on a page that the producer keeps together: an image, or a
+/// drawing of several shapes or images.
+///
+/// Text in a figure is not part of it: it is among the text of its page.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Figure {
+    /// The smallest upright rectangle around the figure.
+    pub bounds: Rect,
+    pub kind: FigureKind,
+    /// Whether the producer marked the figure as an artifact.
+    pub is_artifact: bool,
+    /// A hash of everything about the figure that is not a position: what
+    /// its parts are, in which colors and with which line widths they are
+    /// drawn, and the data of its images.
+    /// Two figures that an engine reads the same of have the same hash.
+    pub content_hash: u64,
+    /// The points that the figure is drawn through, in the order in which
+    /// it is drawn: those of its paths and the corners of its images.
+    pub points: Vec<(f32, f32)>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FigureKind {
+    /// One image.
+    Image { pixel_width: u32, pixel_height: u32 },
+    /// Shapes, images or both that are drawn as one figure.
+    Drawing { part_count: usize },
+}
+
+/// As `image, 640 × 480 pixels` or `drawing, 12 parts`.
+impl fmt::Display for FigureKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            Self::Image {
+                pixel_width,
+                pixel_height,
+            } => write!(formatter, "image, {pixel_width} × {pixel_height} pixels"),
+            Self::Drawing { part_count: 1 } => write!(formatter, "drawing, 1 part"),
+            Self::Drawing { part_count } => write!(formatter, "drawing, {part_count} parts"),
+        }
+    }
 }
 
 /// What a run of consecutive characters has in common.

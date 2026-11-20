@@ -1,9 +1,11 @@
-//! The text of a document as one flow of tokens, across page boundaries.
+//! The text and the figures of a document as one flow of tokens, across page
+//! boundaries.
 //!
-//! A [`RawFlow`] is the text as it is read.
+//! A [`RawFlow`] is what is read.
 //! [`prepare`] makes of it the [`Flow`] that is compared.
 
 mod builder;
+mod figure;
 mod furniture;
 mod hyphen_marks;
 mod join;
@@ -21,6 +23,7 @@ use crate::geometry::{Rect, Size};
 use crate::reader::{ReadError, Reader, Style};
 
 pub use self::builder::FlowBuilder;
+pub use self::figure::{FIGURE_TEXT, Figure};
 use self::join::Vocabulary;
 
 /// Gets two documents ready to be compared with each other.
@@ -78,11 +81,14 @@ impl RawFlow {
     }
 }
 
-/// A word or a punctuation mark on one line.
+/// A word or a punctuation mark on one line, or a figure.
 /// A word that a line break splits is two of these.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RawToken {
+    /// The characters of text, or [`FIGURE_TEXT`] for a figure.
     pub text: String,
+    /// What the token shows if it is a figure.
+    pub figure: Option<Figure>,
     /// Where the token is drawn.
     pub fragment: Fragment,
     /// The white space before the token.
@@ -99,6 +105,13 @@ pub struct RawToken {
     pub line_end_hyphen: Option<LineEndHyphen>,
 }
 
+impl RawToken {
+    /// What [`Token::key`] is.
+    pub fn key(&self) -> Cow<'_, str> {
+        key_of(&self.text, self.figure.as_ref())
+    }
+}
+
 /// The tokens of a document that are compared, in reading order.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Flow {
@@ -110,11 +123,14 @@ pub struct Flow {
     pub styles: Vec<Style>,
 }
 
-/// A word or a punctuation mark.
+/// A word or a punctuation mark, or a figure.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Token {
-    /// The text, without a hyphen that only marks a line break.
+    /// The text, without a hyphen that only marks a line break, or
+    /// [`FIGURE_TEXT`] for a figure.
     pub text: String,
+    /// What the token shows if it is a figure.
+    pub figure: Option<Figure>,
     /// Where the token is drawn: one fragment per line it is on.
     pub fragments: Vec<Fragment>,
     /// The white space before the token.
@@ -139,14 +155,22 @@ impl Token {
         self.raw_indices.start == previous.raw_indices.end
     }
 
-    /// The form of the text that is compared: compatibility characters such as
-    /// ligatures are folded into their plain equivalents.
+    /// What is compared of the token.
+    ///
+    /// For text it is the text, with compatibility characters such as
+    /// ligatures folded into their plain equivalents.
+    /// For a figure it says what the figure is drawn with, so that two
+    /// figures with one key can still be drawn through other points.
     pub fn key(&self) -> Cow<'_, str> {
-        key_of(&self.text)
+        key_of(&self.text, self.figure.as_ref())
     }
 }
 
-fn key_of(text: &str) -> Cow<'_, str> {
+/// The key of a token with this text, which is a figure if `figure` is one.
+fn key_of<'a>(text: &'a str, figure: Option<&Figure>) -> Cow<'a, str> {
+    if let Some(figure) = figure {
+        return Cow::Owned(format!("{text}{:016x}", figure.content_hash));
+    }
     match is_nfkc_quick(text.chars()) {
         IsNormalized::Yes => Cow::Borrowed(text),
         _ => Cow::Owned(text.nfkc().collect()),

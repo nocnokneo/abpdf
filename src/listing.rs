@@ -41,7 +41,8 @@ pub fn write(comparison: &Comparison, mut output: impl Write) -> io::Result<()> 
 mod tests {
     use super::*;
     use crate::testing::{
-        PARAGRAPH, REST, comparison_of, comparison_of_built_pages, page_with_bold,
+        FIGURE_WORDS, PARAGRAPH, PageBuilder, REST, comparison_of, comparison_of_built_pages,
+        page_with_bold, page_with_figure,
     };
 
     fn listing(old: &str, new: &str) -> String {
@@ -83,6 +84,18 @@ mod tests {
         assert_eq!(
             String::from_utf8(output).unwrap(),
             "@ old p. 1 / new p. 1\n~ weight 400 → 700: two\n1 change\n"
+        );
+    }
+
+    #[test]
+    fn figure_is_listed_as_what_it_is() {
+        let comparison =
+            comparison_of_built_pages([page_with_figure(|_| {})], [PageBuilder::new().text("one")]);
+        let mut output = Vec::new();
+        write(&comparison, &mut output).unwrap();
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            format!("@ old p. 1 / new p. 1\n- {FIGURE_WORDS}\n1 change\n")
         );
     }
 

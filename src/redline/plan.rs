@@ -89,7 +89,7 @@ impl Planner<'_> {
         }
     }
 
-    /// The page with a mark for every area that a change has on it.
+    /// The page with the marks of every area that a change has on it.
     fn sheet_page(&self, side: Side, page_index: usize) -> SheetPage {
         let name = self.names[side];
         let page_count = self.comparison.flows[side].page_sizes.len();
@@ -98,12 +98,18 @@ impl Planner<'_> {
             let change_side = &change.sides[side];
             let (color, style) = look_of(change, side);
             let on_page = |area: &&Area| area.page_index == page_index;
-            let to_mark = |area: &Area| Mark {
-                bounds: area.bounds,
-                color,
-                style,
+            // A figure gets a border around what marks text too.
+            let styles_of = |area: &Area| match area.is_figure {
+                true => vec![style, MarkStyle::Border],
+                false => vec![style],
             };
-            marks.extend(change_side.areas().iter().filter(on_page).map(to_mark));
+            for area in change_side.areas().iter().filter(on_page) {
+                marks.extend(styles_of(area).into_iter().map(|style| Mark {
+                    bounds: area.bounds,
+                    color,
+                    style,
+                }));
+            }
         }
         SheetPage {
             page_index,
@@ -224,8 +230,9 @@ mod tests {
     use crate::filter::Filters;
     use crate::geometry::Rect;
     use crate::testing::{
-        CELL_HEIGHT, LINE_PITCH, PARAGRAPH, PageBuilder, REST, cell_bounds,
-        comparison_of_built_pages, comparison_of_pages, page_with_bold, raw_flow_of,
+        CELL_HEIGHT, FIGURE_COLUMN_COUNT, FIGURE_WORDS, LINE_PITCH, PARAGRAPH, PageBuilder, REST,
+        cell_bounds, comparison_of_built_pages, comparison_of_pages, page_with_bold,
+        page_with_figure, raw_flow_of,
     };
 
     /// The redline of two documents, given as the text of each of their pages.
@@ -589,6 +596,29 @@ mod tests {
                 text: "weight 400 → 700: two".to_owned(),
             }]
         );
+    }
+
+    #[test]
+    fn figure_gets_a_border_around_its_highlight() {
+        let comparison = comparison_of_built_pages(
+            [page_with_figure(|_| {})],
+            [page_with_figure(|figure| figure.content_hash = 1)],
+        );
+        let names = BySide {
+            old: "old.pdf",
+            new: "new.pdf",
+        };
+        let redline = Redline::of(&comparison, names);
+        let mark = |style| Mark {
+            bounds: cell_bounds(1, 0..FIGURE_COLUMN_COUNT),
+            color: Rgb::REMOVED,
+            style,
+        };
+        assert_eq!(
+            redline.sheets[0].pages.old.as_ref().unwrap().marks,
+            [mark(MarkStyle::Highlight), mark(MarkStyle::Border)]
+        );
+        assert_eq!(entries(&redline)[0].lines[0].text, FIGURE_WORDS);
     }
 
     #[test]

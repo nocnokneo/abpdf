@@ -101,8 +101,11 @@ pub enum StyleDifference {
 pub enum ChangeSide {
     /// Text that the other document does not have, or has at another place.
     Text {
+        /// The words of the text, with what each figure in it is in their
+        /// place, such as `[image, 640 × 480 pixels]`.
         text: String,
-        /// Where the text is: one area per line, in reading order.
+        /// Where the text is, in reading order: one area per line and one
+        /// per figure.
         areas: Vec<Area>,
     },
     /// Nothing, where the other document has text.
@@ -119,6 +122,8 @@ pub enum ChangeSide {
 pub struct Area {
     pub page_index: usize,
     pub bounds: Rect,
+    /// Whether the area is that of a figure, and not of text on a line.
+    pub is_figure: bool,
 }
 
 impl Change {

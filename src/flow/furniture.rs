@@ -18,7 +18,7 @@ mod running;
 use std::borrow::Cow;
 use std::ops::Range;
 
-use super::{Exclusion, RawToken, Screened, key_of};
+use super::{Exclusion, RawToken, Screened};
 use crate::diff;
 use crate::geometry::{Rect, Size};
 use crate::{BySide, Side};
@@ -58,8 +58,7 @@ fn without_counterpart(
     let keys = BySide::from_fn(|keys_side| {
         let tokens = compared[keys_side].tokens.iter().zip(&furniture[keys_side]);
         let kept = tokens.filter(|(_, rule)| keys_side == side || rule.is_none());
-        kept.map(|(token, _)| key_of(&token.text))
-            .collect::<Vec<_>>()
+        kept.map(|(token, _)| token.key()).collect::<Vec<_>>()
     });
     let hunks = diff::diff(
         &keys

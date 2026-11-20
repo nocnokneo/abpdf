@@ -9,7 +9,7 @@
 //! the old one was.
 
 use super::{Compared, Line};
-use crate::flow::{Exclusion, key_of};
+use crate::flow::Exclusion;
 
 /// Fewer tokens than this are not taken for a repeat: one token alone is too
 /// likely to be on both pages by chance.
@@ -64,7 +64,6 @@ fn is_same_line(compared: &Compared, line: &Line, other: &Line) -> bool {
         && tokens.iter().zip(other_tokens).all(|(token, other_token)| {
             let left = token.fragment.bounds.left;
             let other_left = other_token.fragment.bounds.left;
-            key_of(&token.text) == key_of(&other_token.text)
-                && (left - other_left).abs() <= LEFT_EDGE_TOLERANCE
+            token.key() == other_token.key() && (left - other_left).abs() <= LEFT_EDGE_TOLERANCE
         })
 }

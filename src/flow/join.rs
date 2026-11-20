@@ -66,9 +66,10 @@ fn hyphenated(first: &str, second: &str) -> String {
 /// Sets the tokens that have an exclusion aside and resolves the line-end
 /// hyphens of the others.
 ///
-/// A soft hyphen joins its word to the next token that takes part in the
+/// A soft hyphen joins its word to the next text that takes part in the
 /// comparison, which may be on the next page with a footer and a header in
 /// between.
+/// A figure between the two comes after the word.
 /// A hard hyphen becomes a token of its own.
 /// `vocabulary` decides about a hyphen of unknown kind.
 pub(super) fn join(screened: Screened, vocabulary: &Vocabulary) -> Flow {
@@ -78,11 +79,18 @@ pub(super) fn join(screened: Screened, vocabulary: &Vocabulary) -> Flow {
     // The hyphen after the last of `tokens`, until the token after it tells
     // what it means.
     let mut open_hyphen: Option<LineEndHyphen> = None;
+    // Figures that stand between the parts of a word that a line break
+    // splits, and come after the word.
+    let mut figures_in_word: Vec<Token> = Vec::new();
 
     let screened_tokens = flow.tokens.into_iter().zip(exclusions);
     for (raw_index, (raw, exclusion)) in screened_tokens.enumerate() {
         if let Some(exclusion) = exclusion {
             excluded.push(excluded_token(raw, raw_index, exclusion));
+            continue;
+        }
+        if open_hyphen.is_some() && raw.figure.is_some() {
+            figures_in_word.push(token_of(raw, raw_index));
             continue;
         }
         let mut gap = raw.gap;
@@ -97,6 +105,9 @@ pub(super) fn join(screened: Screened, vocabulary: &Vocabulary) -> Flow {
                     word.styles.dedup();
                     word.raw_indices.end = raw_index + 1;
                     open_hyphen = raw.line_end_hyphen;
+                    if open_hyphen.is_none() {
+                        tokens.append(&mut figures_in_word);
+                    }
                     continue;
                 }
                 Meaning::Punctuation => {
@@ -106,6 +117,7 @@ pub(super) fn join(screened: Screened, vocabulary: &Vocabulary) -> Flow {
                 }
                 Meaning::Nothing => extend_to_hyphen(word, &hyphen),
             }
+            tokens.append(&mut figures_in_word);
         }
         open_hyphen = raw.line_end_hyphen;
         tokens.push(Token {
@@ -124,6 +136,7 @@ pub(super) fn join(screened: Screened, vocabulary: &Vocabulary) -> Flow {
             _ => extend_to_hyphen(word, &hyphen),
         }
     }
+    tokens.append(&mut figures_in_word);
     Flow {
         tokens,
         excluded,
@@ -178,6 +191,7 @@ fn hyphen_token(hyphen: &LineEndHyphen, word: &Token) -> Token {
     let after_word = word.raw_indices.end;
     Token {
         text: "-".to_owned(),
+        figure: None,
         fragments: vec![hyphen.fragment],
         gap: Gap::None,
         styles: word.styles.last().copied().into_iter().collect(),
@@ -202,6 +216,7 @@ fn excluded_token(raw: RawToken, raw_index: usize, exclusion: Exclusion) -> Excl
 fn token_of(raw: RawToken, raw_index: usize) -> Token {
     Token {
         text: raw.text,
+        figure: raw.figure,
         fragments: vec![raw.fragment],
         gap: raw.gap,
         styles: raw.styles,

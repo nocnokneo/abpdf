@@ -248,9 +248,12 @@ fn text_of_embedded_pages_stays_text() {
     };
     let output = redline::write(&redline, both(pdf.clone())).expect("the redline is written");
 
+    // A page that is embedded is a form, which reads as a figure where the
+    // page draws shapes.
     let raw_texts = |pdf| -> Vec<String> {
-        let tokens = raw_flow_of(pdf).tokens;
-        tokens.into_iter().map(|token| token.text).collect()
+        let tokens = raw_flow_of(pdf).tokens.into_iter();
+        let text_tokens = tokens.filter(|token| token.figure.is_none());
+        text_tokens.map(|token| token.text).collect()
     };
     assert_eq!(raw_texts(Arc::new(output)), raw_texts(pdf));
 }

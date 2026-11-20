@@ -2,7 +2,8 @@ use super::*;
 use crate::BySide;
 use crate::filter::Filters;
 use crate::testing::{
-    CELL_HEIGHT, CELL_WIDTH, LINE_PITCH, PageBuilder, excluded_texts, raw_flow_of, texts,
+    CELL_HEIGHT, CELL_WIDTH, FIGURE_COLUMN_COUNT, LINE_PITCH, PageBuilder, cell_bounds,
+    excluded_texts, raw_flow_of, texts,
 };
 
 /// The flow of a document with these pages, as a comparison with itself sees
@@ -476,4 +477,56 @@ fn producer_that_marks_artifacts_says_what_its_headers_are() {
     };
     let flow = flow_of([page("one"), page("two")]);
     assert_eq!(running(&flow), (vec![], vec![]));
+}
+
+#[test]
+fn figure_is_a_token_on_a_line_of_its_own() {
+    let flow = flow_of([PageBuilder::new().text("one ").image().text(" two")]);
+    assert_eq!(texts(&flow), ["one", FIGURE_TEXT, "two"]);
+    let lines: Vec<usize> = flow
+        .tokens
+        .iter()
+        .map(|token| token.fragments[0].line_index)
+        .collect();
+    assert_eq!(lines, [0, 1, 2]);
+    assert_eq!(
+        flow.tokens[1].fragments[0].bounds,
+        cell_bounds(0, 4..4 + FIGURE_COLUMN_COUNT)
+    );
+}
+
+#[test]
+fn key_of_a_figure_says_what_it_is_drawn_with_and_not_where() {
+    let page = PageBuilder::new()
+        .image()
+        .image()
+        .figure(|figure| figure.content_hash = 1)
+        .figure(|figure| figure.points[2].0 += 1.0);
+    let flow = flow_of([page]);
+    let keys: Vec<_> = flow.tokens.iter().map(Token::key).collect();
+    assert_eq!(keys[0], keys[1]);
+    assert_ne!(keys[0], keys[2]);
+    assert_eq!(keys[0], keys[3]);
+    assert_ne!(keys[0], FIGURE_TEXT);
+}
+
+#[test]
+fn figure_that_the_producer_marks_as_an_artifact_is_left_out() {
+    let page = PageBuilder::new()
+        .text("one ")
+        .figure(|figure| figure.is_artifact = true);
+    let flow = flow_of([page]);
+    assert_eq!(texts(&flow), ["one"]);
+    assert_eq!(excluded_texts(&flow), [FIGURE_TEXT]);
+}
+
+#[test]
+fn figure_between_the_parts_of_a_word_comes_after_the_word() {
+    let page = PageBuilder::new()
+        .text("inter")
+        .line_end_hyphen()
+        .image()
+        .text("\nnational one");
+    let flow = flow_of([page]);
+    assert_eq!(texts(&flow), ["international", FIGURE_TEXT, "one"]);
 }

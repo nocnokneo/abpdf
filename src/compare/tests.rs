@@ -9,8 +9,8 @@ use crate::change::{
 use crate::filter::Filters;
 use crate::flow::{Exclusion, Flow};
 use crate::testing::{
-    PARAGRAPH, PageBuilder, REST, bold_difference, cell_bounds, comparison_of,
-    comparison_of_built_pages, page_with_bold, raw_flow_of,
+    FIGURE_COLUMN_COUNT, FIGURE_WORDS, PARAGRAPH, PageBuilder, REST, bold_difference, cell_bounds,
+    comparison_of, comparison_of_built_pages, page_with_bold, page_with_figure, raw_flow_of,
 };
 
 fn compare_with(
@@ -49,6 +49,7 @@ fn cells(page_index: usize, line: usize, columns: Range<usize>) -> Area {
     Area {
         page_index,
         bounds: cell_bounds(line, columns),
+        is_figure: false,
     }
 }
 
@@ -744,4 +745,114 @@ fn style_of_text_that_moved_is_compared() {
     );
     assert_eq!(changes[1].sides.old.areas(), [cells(0, 0, 5..14)]);
     assert_eq!(changes[1].sides.new.areas(), [cells(0, 1, 5..14)]);
+}
+
+fn compare_built(old: PageBuilder, new: PageBuilder) -> Vec<Change> {
+    compare_with([old], [new], &Filters::default())
+}
+
+/// The area of a figure at the start of `line` of the first page.
+fn figure_area(line: usize) -> Area {
+    Area {
+        is_figure: true,
+        ..cells(0, line, 0..FIGURE_COLUMN_COUNT)
+    }
+}
+
+#[test]
+fn figure_that_only_the_new_document_has_is_inserted() {
+    let changes = compare_built(PageBuilder::new().text("one"), page_with_figure(|_| {}));
+    assert_eq!(
+        summaries(&changes),
+        [(ChangeKind::Inserted, "", FIGURE_WORDS)]
+    );
+    assert_eq!(changes[0].sides.new.areas(), [figure_area(1)]);
+}
+
+#[test]
+fn figure_with_other_content_is_replaced() {
+    let changes = compare_built(
+        page_with_figure(|_| {}),
+        page_with_figure(|figure| figure.content_hash = 1),
+    );
+    assert_eq!(
+        summaries(&changes),
+        [(ChangeKind::Replaced, FIGURE_WORDS, FIGURE_WORDS)]
+    );
+    assert_eq!(changes[0].sides.old.areas(), [figure_area(1)]);
+}
+
+#[test]
+fn figure_that_is_drawn_through_other_points_is_replaced() {
+    let changes = compare_built(
+        page_with_figure(|_| {}),
+        page_with_figure(|figure| figure.points[2].1 += 1.0),
+    );
+    assert_eq!(
+        summaries(&changes),
+        [(ChangeKind::Replaced, FIGURE_WORDS, FIGURE_WORDS)]
+    );
+}
+
+#[test]
+fn figure_at_another_place_on_its_page_is_no_change() {
+    let lower = PageBuilder::new().text("one\n\n\n").image();
+    assert_eq!(compare_built(page_with_figure(|_| {}), lower), []);
+}
+
+#[test]
+fn figure_changes_apart_from_the_text_before_it() {
+    let old = PageBuilder::new().text("old words\n").image();
+    let new = PageBuilder::new()
+        .text("new text\n")
+        .figure(|figure| figure.content_hash = 1);
+    assert_eq!(
+        summaries(&compare_built(old, new)),
+        [
+            (ChangeKind::Replaced, "old words", "new text"),
+            (ChangeKind::Replaced, FIGURE_WORDS, FIGURE_WORDS),
+        ]
+    );
+}
+
+#[test]
+fn figure_that_stays_between_texts_that_change_is_no_change() {
+    // The texts are longer than the key of the figure, so the diff takes
+    // the figure for a coincidence and leaves it in their hunk.
+    let page = |before: &str, after: &str| {
+        PageBuilder::new()
+            .text(&format!("{before}\n"))
+            .image()
+            .text(&format!("\n{after}"))
+    };
+    let changes = compare_built(
+        page("alpha beta gamma delta", "epsilon zeta eta theta"),
+        page("one two three four five", "six seven eight nine ten"),
+    );
+    assert_eq!(
+        summaries(&changes),
+        [
+            (
+                ChangeKind::Replaced,
+                "alpha beta gamma delta",
+                "one two three four five"
+            ),
+            (
+                ChangeKind::Replaced,
+                "epsilon zeta eta theta",
+                "six seven eight nine ten"
+            ),
+        ]
+    );
+}
+
+#[test]
+fn text_that_changes_stays_whole_around_a_figure_that_one_side_has() {
+    let old = PageBuilder::new().text("old words");
+    let new = PageBuilder::new().text("new\n").image().text("\ntext");
+    let with_figure = format!("new {FIGURE_WORDS} text");
+    assert_eq!(
+        summaries(&compare_built(old, new)),
+        [(ChangeKind::Replaced, "old words", with_figure.as_str())]
+    );
 }

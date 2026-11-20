@@ -20,6 +20,13 @@ pub(super) struct Structure {
     pub cell: Option<usize>,
 }
 
+impl Structure {
+    /// Whether the element that the content is directly in is a figure.
+    pub fn is_figure(&self) -> bool {
+        self.path.rsplit('/').next() == Some("Figure")
+    }
+}
+
 /// The structure of each piece of marked content on `page`, by its marked
 /// content identifier.
 pub(super) fn by_marked_content_id(page: &LoadedPage) -> HashMap<c_int, Structure> {

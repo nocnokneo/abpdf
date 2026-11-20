@@ -46,6 +46,13 @@ struct AreaRecord {
     top: f64,
     right: f64,
     bottom: f64,
+    /// Whether the area is that of a figure.
+    #[serde(skip_serializing_if = "is_false")]
+    figure: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 pub fn write(comparison: &Comparison, mut output: impl Write) -> io::Result<()> {
@@ -110,6 +117,7 @@ fn area_record(area: &Area) -> AreaRecord {
         top: hundredths(area.bounds.top),
         right: hundredths(area.bounds.right),
         bottom: hundredths(area.bounds.bottom),
+        figure: area.is_figure,
     }
 }
 
@@ -119,7 +127,8 @@ mod tests {
 
     use super::*;
     use crate::testing::{
-        PARAGRAPH, REST, comparison_of, comparison_of_built_pages, page_with_bold,
+        FIGURE_WORDS, PARAGRAPH, REST, comparison_of, comparison_of_built_pages, page_with_bold,
+        page_with_figure,
     };
 
     fn report(old: &str, new: &str) -> Value {
@@ -179,6 +188,26 @@ mod tests {
             change["style"],
             json!([{ "property": "weight", "old": 400, "new": 700 }])
         );
+    }
+
+    #[test]
+    fn area_of_a_figure_says_that_it_is_one() {
+        let comparison = comparison_of_built_pages(
+            [page_with_figure(|_| {})],
+            [page_with_figure(|figure| figure.content_hash = 1)],
+        );
+        let mut output = Vec::new();
+        write(&comparison, &mut output).unwrap();
+        let report: Value = serde_json::from_slice(&output).unwrap();
+        let old = &report["changes"][0]["old"];
+        assert_eq!(old["text"], FIGURE_WORDS);
+        assert_eq!(old["areas"][0]["figure"], true);
+    }
+
+    #[test]
+    fn area_of_text_does_not_say_that_it_is_a_figure() {
+        let report = report("keep old", "keep newer");
+        assert_eq!(report["changes"][0]["old"]["areas"][0].get("figure"), None);
     }
 
     #[test]

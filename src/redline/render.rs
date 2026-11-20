@@ -27,6 +27,7 @@ const NOTE_COLOR: Rgb = Rgb::new(115, 115, 115);
 const FRAME_COLOR: Rgb = Rgb::new(153, 153, 153);
 const FRAME_LINE_WIDTH: f32 = 0.5;
 const CARET_LINE_WIDTH: f32 = 1.2;
+const BORDER_LINE_WIDTH: f32 = 1.5;
 
 /// How much of a mark's color a highlight keeps: the rest is white, so that
 /// the text under it stays readable.
@@ -183,6 +184,7 @@ fn draw_marks(surface: &mut Surface, layout: &SheetLayout, side: Side, marks: &[
         match style {
             MarkStyle::Highlight => highlight_rects(surface, rects, color),
             MarkStyle::Outline => stroke_rects(surface, rects, color, OUTLINE_LINE_WIDTH),
+            MarkStyle::Border => stroke_rects(surface, rects, color, BORDER_LINE_WIDTH),
             MarkStyle::Caret => stroke_left_edges(surface, rects, color),
         }
     }

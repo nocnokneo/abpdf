@@ -87,18 +87,24 @@ pub(super) fn restyled(
     }
 }
 
+/// The tokens in words: their texts with the white space between them, and
+/// in the place of each figure what it is.
 fn text_of(tokens: &[&Token]) -> String {
     let mut text = String::new();
     for (index, token) in tokens.iter().enumerate() {
         if index > 0 && token.gap != Gap::None {
             text.push(' ');
         }
-        text.push_str(&token.text);
+        match &token.figure {
+            Some(figure) => text.push_str(&format!("[{}]", figure.kind)),
+            None => text.push_str(&token.text),
+        }
     }
     text
 }
 
-/// The bounds of tokens, merged per line.
+/// The bounds of tokens: those of text merged per line, and those of each
+/// figure.
 /// Tokens that other tokens of the document stand between are not merged,
 /// so that an area does not cover those: neither text that belongs to
 /// another change nor text that is left out of the comparison.
@@ -119,6 +125,7 @@ fn areas_of<'a>(tokens: impl IntoIterator<Item = &'a Token>) -> Vec<Area> {
                 _ => areas.push(Area {
                     page_index: fragment.page_index,
                     bounds: fragment.bounds,
+                    is_figure: token.figure.is_some(),
                 }),
             }
             last = Some((token, line));
@@ -142,6 +149,7 @@ fn insertion_point(
     let after_previous = previous.map(|token| {
         let fragment = token.fragments.last().expect("a token has a fragment");
         Area {
+            is_figure: false,
             page_index: fragment.page_index,
             bounds: Rect {
                 left: fragment.bounds.right,
@@ -152,6 +160,7 @@ fn insertion_point(
     let before_next = sequence.tokens.get(position).map(|token| {
         let fragment = token.fragments[0];
         Area {
+            is_figure: false,
             page_index: fragment.page_index,
             bounds: Rect {
                 right: fragment.bounds.left,
