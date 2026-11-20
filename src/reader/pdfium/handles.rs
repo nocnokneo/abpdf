@@ -440,6 +440,17 @@ impl Mark<'_> {
         })
     }
 
+    /// Whether the sequence has a property with this key.
+    pub fn has_property(&self, key: &str) -> bool {
+        // 0 is PDFium's `FPDF_OBJECT_UNKNOWN`, for a property that is not
+        // there.
+        unsafe {
+            self.pdfium
+                .FPDFPageObjMark_GetParamValueType(self.handle, key)
+                != 0
+        }
+    }
+
     /// The value of a property that is a text string.
     ///
     /// PDFium's own getter for strings takes the bytes of every string for
