@@ -228,21 +228,3 @@ fn missing_arguments_exit_with_2() {
         stderr(&output)
     );
 }
-
-#[test]
-fn pdfium_that_cannot_be_loaded_exits_with_2_without_blaming_a_document() {
-    let pdf = corpus("revisions-old-tagged.pdf");
-    let output = Command::new(env!("CARGO_BIN_EXE_abpdf"))
-        .args([&pdf, &pdf])
-        .env("ABPDF_PDFIUM_LIBRARY", corpus("no-such-library"))
-        .output()
-        .expect("abpdf runs");
-    assert_eq!(output.status.code(), Some(2));
-    let message = stderr(&output);
-    assert!(
-        message.starts_with("abpdf: cannot load the PDFium library: "),
-        "{message}"
-    );
-    assert!(message.contains("no-such-library"), "{message}");
-    assert!(!message.contains("revisions-old-tagged.pdf"), "{message}");
-}

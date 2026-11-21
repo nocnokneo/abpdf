@@ -37,7 +37,7 @@
 
 	// The mise feature only installs the binary, and `devcontainer exec` runs
 	// no shell that would activate it, so put the shims on PATH here. A shim
-	// also applies the [env] of mise.toml, which is how cargo finds PDFium.
+	// also applies the [env] of mise.toml.
 	// It has to be remoteEnv: containerEnv does not expand ${containerEnv:PATH}.
 	"remoteEnv": {
 		"PATH": "/home/vscode/.local/share/mise/shims:${containerEnv:PATH}"

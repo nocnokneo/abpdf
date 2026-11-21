@@ -21,7 +21,7 @@ const TOUCH_DISTANCE: f32 = 1.0;
 
 /// What tells of an object of a page whether it is part of a drawing.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(in crate::reader) enum Item {
+pub(super) enum Item {
     /// A shape that nothing keeps together with others.
     Shape {
         /// The smallest upright rectangle around its outline.
@@ -57,7 +57,7 @@ pub(in crate::reader) enum Item {
 ///
 /// A run whose shapes have the text of several table cells in them is what
 /// the table draws around its cells, and no drawing.
-pub(in crate::reader) fn drawings(items: &[Item]) -> Vec<Vec<usize>> {
+pub(super) fn drawings(items: &[Item]) -> Vec<Vec<usize>> {
     let mut runs: Vec<Run> = Vec::new();
     for stretch in stretches(items) {
         let continues_last = runs.last().is_some_and(|run| {

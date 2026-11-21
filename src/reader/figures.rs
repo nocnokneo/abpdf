@@ -1,6 +1,6 @@
 //! The figures of a page.
 
-pub(in crate::reader) mod loose;
+mod loose;
 
 use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;

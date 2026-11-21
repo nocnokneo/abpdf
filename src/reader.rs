@@ -1,9 +1,8 @@
 //! Reading the content of a PDF.
 //!
-//! [`Reader`] is the boundary between a PDF engine and the rest of abpdf.
-//! An engine reports each page as a [`Page`]: plain data in
-//! [page space](crate::geometry), with nothing engine-specific in it, so that
-//! two engines can be compared by comparing what they report.
+//! A [`Document`] reports each of its pages as a [`Page`]: plain data in
+//! [page space](crate::geometry), with nothing in it of how a PDF draws a
+//! page, so that nothing downstream needs to know.
 
 mod content;
 mod document;
@@ -11,7 +10,6 @@ mod figures;
 mod fonts;
 mod matrix;
 mod page_space;
-pub mod pdfium;
 mod structure;
 #[cfg(test)]
 mod testing;
@@ -21,29 +19,14 @@ mod text_string;
 use std::fmt;
 
 pub use self::document::{Document, Pages};
-
 use crate::geometry::{Rect, Size};
-
-/// One opened PDF document.
-pub trait Reader {
-    /// Whether the document declares that it is a tagged PDF.
-    fn is_tagged(&self) -> bool;
-
-    fn page_count(&self) -> usize;
-
-    fn read_page(&self, page_index: usize) -> Result<Page, ReadError>;
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ReadError {
-    #[error("cannot load the PDFium library: {0}")]
-    EngineUnavailable(String),
     #[error("the file is not a PDF or is damaged")]
     InvalidDocument,
     #[error("the PDF is password protected")]
     PasswordProtected,
-    #[error("cannot read page {page_number}")]
-    InvalidPage { page_number: usize },
 }
 
 /// The text and the figures of one page.
@@ -58,14 +41,15 @@ pub struct Page {
     ///
     /// The text is as it is printed: a hyphen that ends a line is a
     /// character like any other, with a line break after it.
-    /// Whether it breaks a word is not for an engine to say.
+    /// Whether it breaks a word is not for a reader to say.
     pub text: Vec<TextItem>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TextItem {
     Char(Char),
-    /// White space within a line.
+    /// What sets text apart from the text before it on its line: white
+    /// space, or a step up or down to text that is raised or lowered.
     Space,
     LineBreak,
     /// A figure, as its index in [`Page::figures`].
@@ -90,7 +74,7 @@ pub struct Figure {
     /// A hash of everything about the figure that is not a position: what
     /// its parts are, in which colors and with which line widths they are
     /// drawn, and the data of its images.
-    /// Two figures that an engine reads the same of have the same hash.
+    /// Two figures that the same is read of have the same hash.
     pub content_hash: u64,
     /// The points that the figure is drawn through, in the order in which
     /// it is drawn: those of its paths and the corners of its images.
@@ -181,7 +165,9 @@ impl fmt::Display for Color {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Char {
     /// The character, which is not white space.
-    /// A character the PDF gives no Unicode value for is U+FFFD.
+    /// Where a font does not say which character a glyph is, it is the
+    /// one with the number of the character code, which is what such a
+    /// font most often means, and U+FFFD if that shows nothing.
     pub text: char,
     /// The box that the font reserves for the glyph: as high as a line and as
     /// wide as the glyph's advance.

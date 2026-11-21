@@ -1,4 +1,4 @@
-//! What the PDFium reader and the flow get out of real PDFs.
+//! What the reader and the flow get out of real PDFs.
 
 mod common;
 
@@ -6,8 +6,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use abpdf::flow::{Cell, Exclusion, FIGURE_TEXT, Figure, Flow, Token};
-use abpdf::reader::pdfium::PdfiumReader;
-use abpdf::reader::{Color, FigureKind, Page, ReadError, Reader, Span, TextItem};
+use abpdf::reader::{Color, Document, FigureKind, Page, ReadError, Span, TextItem};
 
 use common::{corpus, flow_of, raw_flow_of, texts, token};
 
@@ -23,10 +22,8 @@ fn untagged() -> Flow {
 
 /// The pages of a PDF of the corpus as the reader reports them.
 fn pages_of(file_name: &str) -> Vec<Page> {
-    let reader = PdfiumReader::open(corpus(file_name)).expect("the PDF opens");
-    (0..reader.page_count())
-        .map(|page_index| reader.read_page(page_index).expect("the page reads"))
-        .collect()
+    let document = Document::open(corpus(file_name)).expect("the PDF opens");
+    document.pages().collect()
 }
 
 /// The span of the character with which a page first reads `text`.
@@ -99,7 +96,7 @@ fn contains_sequence(texts: &[&str], sequence: &[&str]) -> bool {
 #[test]
 fn tagging_is_detected() {
     let is_tagged = |file_name| {
-        PdfiumReader::open(corpus(file_name))
+        Document::open(corpus(file_name))
             .expect("the PDF opens")
             .is_tagged()
     };
@@ -348,19 +345,15 @@ fn style_is_read() {
 
 #[test]
 fn what_is_not_a_pdf_is_rejected() {
-    let result = PdfiumReader::open(Arc::new(b"not a PDF".to_vec()));
+    let result = Document::open(Arc::new(b"not a PDF".to_vec()));
     assert!(matches!(result, Err(ReadError::InvalidDocument)));
 }
 
 #[test]
-fn page_that_does_not_exist_is_an_error() {
-    let reader = PdfiumReader::open(corpus("reading-tagged.pdf")).expect("the PDF opens");
-    assert_eq!(reader.page_count(), 4);
-    let result = reader.read_page(4);
-    assert!(matches!(
-        result,
-        Err(ReadError::InvalidPage { page_number: 5 })
-    ));
+fn every_page_is_read() {
+    let document = Document::open(corpus("reading-tagged.pdf")).expect("the PDF opens");
+    assert_eq!(document.page_count(), 4);
+    assert_eq!(document.pages().count(), 4);
 }
 
 #[test]

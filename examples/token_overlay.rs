@@ -14,7 +14,7 @@ use std::{env, fs};
 
 use abpdf::BySide;
 use abpdf::flow::RawFlow;
-use abpdf::reader::pdfium::PdfiumReader;
+use abpdf::reader::Document;
 use abpdf::redline::{self, Mark, MarkStyle, Redline, Rgb, Sheet, SheetPage};
 
 const ARTIFACT_COLOR: Rgb = Rgb::new(128, 128, 128);
@@ -28,8 +28,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let new_pdf = Arc::new(fs::read(new_path)?);
 
     let started = Instant::now();
-    let old_flow = RawFlow::read(&PdfiumReader::open(old_pdf.clone())?)?;
-    let new_flow = RawFlow::read(&PdfiumReader::open(new_pdf.clone())?)?;
+    let old_flow = RawFlow::read(&Document::open(old_pdf.clone())?);
+    let new_flow = RawFlow::read(&Document::open(new_pdf.clone())?);
     let read = Instant::now();
 
     let mut old_pages = sheet_pages(old_path, &old_flow).into_iter();
