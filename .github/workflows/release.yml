@@ -66,13 +66,14 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             rustflags: -C target-feature=+crt-static
+            extension: .exe
           - target: aarch64-apple-darwin
             os: macos-latest
           - target: x86_64-apple-darwin
             os: macos-latest
     env:
       NAME: abpdf-${{ needs.version.outputs.version }}-${{ matrix.target }}
-      BINARY: target/${{ matrix.target }}/dist/abpdf${{ runner.os == 'Windows' && '.exe' || '' }}
+      BINARY: target/${{ matrix.target }}/dist/abpdf${{ matrix.extension }}
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5
