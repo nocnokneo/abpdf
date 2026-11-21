@@ -76,12 +76,12 @@ What the prototype gets wrong is the first work list:
 
 ## What the spike established
 
-The first step of the [order of work](#order-of-work) settled how positions are measured and what embedding costs, and showed what PDFium gets out of a tagged PDF.
+The first step of the [order of work](#order-of-work) settled how positions are measured and what embedding costs, and showed what a tagged PDF says.
 
 Positions:
 
 - Every position is in page space: the page as a viewer shows it, with the crop box and the rotation applied, measured in PDF units from the top left corner with y growing downward.
-- PDFium reports text in PDF user space, and the page's bounding box and rotation are all it takes to convert that.
+- A page draws its text in PDF user space, and the visible box of the page and its rotation are all it takes to convert that.
 - `krilla` embeds a page upright and starting at its crop box, so a mark at a token's bounds lands on the token.
   Tests hold this for the four rotations, with and without a crop box away from the origin, by reading the redline back.
 - Neither side applies a page's `UserUnit`, so they agree on such pages too.
@@ -102,15 +102,12 @@ Tagged PDFs from Typst:
 
 - Headers, footers, table of contents leaders, repeated table headers and text inside `pdf.artifact` all arrive marked as artifacts.
 - The structure tree gives each token the types of the elements around it, such as `Document/Table/TBody/TR/TD`.
-- PDFium replaces a hyphen that ends a line inside a word with a marker and drops the line break, whether the producer's line breaking added the hyphen or the text has it.
+- A hyphen that ends a line inside a word is there because the producer broke the word, or because the text has it.
   Typst draws both kinds with one glyph, which maps to one of them, and names the other kind with `ActualText` wherever it occurs.
-  So the kind of an unmarked hyphen follows from the marked hyphens of its font, and is unknown only in a font that has none.
-- PDFium decodes the `ActualText` of marked content wrongly when it is UTF-16, so abpdf decodes the string's bytes itself.
+  So the kind of an unmarked hyphen follows from the marked hyphens of its font, and is unknown only in a font that has none and maps the glyph to the hyphen of the text.
 
 Stack:
 
-- `pdfium-render` is used for its bindings to PDFium's C interface only.
-  Its own interface does not reach marked content or the structure tree.
 - A page can only be embedded in a PDF of at least its own version, so the redline is PDF 1.7 unless a source is newer.
 
 ## Use what the producer already says
@@ -169,21 +166,26 @@ Sheets:
 | Part | Choice | Reason |
 | -- | -- | -- |
 | Language | Rust | One fast native binary per platform, and WebAssembly later for a viewer. |
-| Reading | PDFium through `pdfium-render`, behind an interface | The only permissively licensed engine with per-glyph style, generated word spaces, and access to the structure tree and marked content. |
+| Reading | An interpreter of abpdf's own on `hayro-syntax` and `hayro-font` | Reports what a page draws as objects, with their fonts, marked content and forms, and leaves abpdf one binary. |
 | Writing | `krilla` | Embeds source pages as vector content, draws overlays, bookmarks and links. |
 | Diff | `imara-diff` | Histogram diff that stays near linear on long, mostly equal inputs. |
-| Later | `hayro` as a second reader | Removes the PDFium shared library, for a single static binary. |
 
-The reader sits behind an interface from the start so that a second implementation can be compared against the first in tests before it replaces it.
+Two readers that are there to take were not enough:
+
+- PDFium was the first reader.
+  It is a shared library to load next to the program, it does not say what kind of artifact a shape is, and it reports a hyphen at a line end as a marker of its own.
+  The reader of abpdf's own replaced it once both got the same out of the test corpus.
+- The interpreter of `hayro` is made to render.
+  Its interface does not say where a form starts and ends or which font dictionary a glyph is drawn with, and abpdf needs both: an included PDF is one figure, and the name of a Type 1 font is only in its dictionary.
 
 ## Risks
 
 - Two layouts of the same text can extract as different token sequences.
-- PDFium is distributed as a shared library, so until `hayro` can replace it the release is an archive, not one file.
+- The reader is abpdf's own, so what it has not met in a PDF it may read wrongly.
 - Where the producer does not mark its hyphens, whether a hyphen at a line end belongs to the word is a guess.
 - Comparing vector drawings is noisy.
 - `krilla` does not write comment annotations.
-- `krilla` and `hayro` are young, and PDFium's editing interface is marked experimental.
+- `krilla` and the `hayro` crates are young.
 
 ## Testing
 
@@ -224,10 +226,17 @@ The reader sits behind an interface from the start so that a second implementati
    - A drawing is told from what rules and boxes text by its shapes: a thin shape is a rule and any other shape with text in it is a box of text, and a drawing has a shape that is neither or a rule that joins a box of text to something.
      Boxes of text alone are none, so that notes in frames one after the other are not taken for a diagram, at the price of a diagram that is nothing but labelled boxes.
      Typst marks the shapes of a diagram as layout artifacts, the same as the rules of a table, so its marks do not tell.
-   - Tags tell two things: text in several table cells makes the shapes around it those of a table, and a shape whose artifact says where on the page it is attached, what part of the page it is or which area it takes belongs to the page.
-     PDFium does not report the type of an artifact, which is a name.
-   - The rules take plain data and know no engine: a second reader has to bring them the bounds of the shapes and the middles and table cells of the texts.
-6. `hayro` reader; release archives; packaging.
-   Done so far: an engine reports text as it is printed, and the flow finds the hyphens that end a line inside a word, so a second reader has no marker of PDFium's to imitate.
-   - The flow also takes a hyphen at the end of a page for one, which PDFium does not, because it reads a page at a time.
-   - Ignore patterns see a word that a line break splits as one word with its hyphen, as `well-known`, and without it only where the producer marks the hyphen as no part of the word.
+   - Tags tell two things: text in several table cells makes the shapes around it those of a table, and a shape that is marked as an artifact of pagination, of the page or of its background belongs to the page.
+   - The rules take plain data: the bounds of the shapes and the middles and table cells of the texts.
+6. A reader of abpdf's own in place of PDFium; release archives; packaging.
+   Done: abpdf reads PDFs with an interpreter of its own and is one binary.
+   It finds the same changes as with PDFium in the test corpus and in the synthetic manual, with and without tags, and a comparison of the manual takes 0.9 seconds where it took 1.8.
+   - The reader reports text as it is printed, and the flow finds the hyphens that end a line inside a word, also at the end of a page.
+     Ignore patterns see a word that a line break splits as one word with its hyphen, as `well-known`, and without it only where the producer marks the hyphen as no part of the word.
+   - Where a word and a line end is told from where the glyphs stand, by three numbers that are shares of the font size: an eighth after the end of a glyph is a space, a tenth off the baseline is raised or lowered, and half off it is another line.
+     Text is not sorted: it is read in the order in which the page draws it.
+   - A glyph has the box that its font reserves for it, from the font descriptor, so a mark is as high as its line and no font program is parsed for it.
+   - Colors are read to tell them apart and to name them: no color profile is applied, and inks are read as a gray.
+   - Held against PDFium on 207 documents of a dozen producers that were at hand, among them pdfTeX, Word, LibreOffice, Apache FOP and Chrome, the reader differs in 2 of 1000 tokens.
+     Most are spaces that PDFium does not find and indices that it does not set apart.
+   - Not done: text that is drawn twice to look bold reads twice, and text that is written from the top down has a box of a guessed width.
