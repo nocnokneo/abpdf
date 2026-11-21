@@ -10,6 +10,7 @@ use super::{RawFlow, RawToken};
 use crate::geometry::{Rect, Size};
 use crate::reader::{self, Char, Page, Style, TextItem};
 
+const HYPHEN: char = '-';
 const SOFT_HYPHEN: char = '\u{AD}';
 
 /// Characters that a viewer does not show.
@@ -88,9 +89,9 @@ struct PageTokenizer<'a> {
 
 impl PageTokenizer<'_> {
     fn tokenize(mut self) {
-        for item in &self.page.text {
+        for (index, item) in self.page.text.iter().enumerate() {
             match item {
-                TextItem::Char(character) => self.add_char(character),
+                TextItem::Char(character) => self.add_char(character, index),
                 TextItem::Space => {
                     self.end_run(None);
                     self.gap = self.gap.max(Gap::Space);
@@ -106,17 +107,18 @@ impl PageTokenizer<'_> {
         self.end_run(None);
     }
 
-    fn add_char(&mut self, character: &Char) {
+    /// Adds the character that is the item at `index` of the text of the
+    /// page.
+    fn add_char(&mut self, character: &Char, index: usize) {
         let page = self.page;
         let span = &page.spans[character.span];
         self.builder.hyphen_marks.note(span);
 
-        if character.is_line_end_hyphen && !self.run.is_empty() {
+        if character.text == HYPHEN && self.is_inside_word_at_line_end(index) {
             self.end_run(Some(RunEndHyphen {
                 character: *character,
                 marked_kind: hyphen_marks::marked_kind(span),
             }));
-            self.line_index += 1;
             return;
         }
         if character.text == SOFT_HYPHEN && !self.run.is_empty() {
@@ -136,6 +138,29 @@ impl PageTokenizer<'_> {
         }
         self.trailing_soft_hyphen = None;
         self.run.push(*character);
+    }
+
+    /// Whether a hyphen that is the item at `index` of the text of the page
+    /// ends a line inside a word.
+    ///
+    /// It does where it comes right after a letter, is the last character
+    /// of its line and the next line starts with a letter or a digit.
+    /// At the end of a page there is no next line to look at, and what
+    /// comes after the hyphen is known when the words are rejoined.
+    /// What the hyphen means is another matter: it can be part of the word.
+    fn is_inside_word_at_line_end(&self, index: usize) -> bool {
+        let follows_letter = self
+            .run
+            .last()
+            .is_some_and(|before| before.text.is_alphabetic());
+        let mut rest_of_page = self.page.text[index + 1..].iter();
+        let after_line = rest_of_page.by_ref().find(|item| **item != TextItem::Space);
+        let ends_line = matches!(after_line, Some(TextItem::LineBreak) | None);
+        let next_character = rest_of_page.find_map(|item| match item {
+            TextItem::Char(character) => Some(character.text),
+            TextItem::Space | TextItem::LineBreak | TextItem::Figure(_) => None,
+        });
+        follows_letter && ends_line && next_character.is_none_or(char::is_alphanumeric)
     }
 
     /// Makes a figure a token, on a line of its own.

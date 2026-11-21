@@ -69,7 +69,7 @@ impl PageBuilder {
                     self.page.text.push(TextItem::LineBreak);
                     self.next_line();
                 }
-                _ => self.push_char(character, false),
+                _ => self.push_char(character),
             }
         }
         self
@@ -144,15 +144,12 @@ impl PageBuilder {
         self.figure(|_| {})
     }
 
-    /// Adds a hyphen that ends the line inside a word, the way a reader
-    /// reports it: with no line break after it.
-    pub(crate) fn line_end_hyphen(mut self) -> Self {
-        self.push_char('-', true);
-        self.next_line();
-        self
+    /// Adds a hyphen and ends the line.
+    pub(crate) fn line_end_hyphen(self) -> Self {
+        self.text("-\n")
     }
 
-    fn push_char(&mut self, text: char, is_line_end_hyphen: bool) {
+    fn push_char(&mut self, text: char) {
         let left = self.column as f32 * CELL_WIDTH;
         let top = self.line as f32 * LINE_PITCH;
         self.page.text.push(TextItem::Char(Char {
@@ -164,7 +161,6 @@ impl PageBuilder {
                 bottom: top + CELL_HEIGHT,
             },
             span: self.page.spans.len() - 1,
-            is_line_end_hyphen,
         }));
         self.column += 1;
     }

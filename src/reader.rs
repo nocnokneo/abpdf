@@ -42,6 +42,10 @@ pub struct Page {
     /// The figures that [`TextItem::Figure`] refers to.
     pub figures: Vec<Figure>,
     /// The text in reading order, with the figures where they stand in it.
+    ///
+    /// The text is as it is printed: a hyphen that ends a line is a
+    /// character like any other, with a line break after it.
+    /// Whether it breaks a word is not for an engine to say.
     pub text: Vec<TextItem>,
 }
 
@@ -171,13 +175,6 @@ pub struct Char {
     pub bounds: Rect,
     /// Index into [`Page::spans`].
     pub span: usize,
-    /// Whether this is a hyphen that ends a line in the middle of a word.
-    ///
-    /// The word continues with the next character: no line break is reported
-    /// after such a hyphen.
-    /// The engine may not know which character the hyphen is, in which case
-    /// `text` is `'-'`; [`Span::actual_text`] can tell.
-    pub is_line_end_hyphen: bool,
 }
 
 #[cfg(test)]
