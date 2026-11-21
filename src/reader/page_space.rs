@@ -11,6 +11,52 @@ pub(super) struct UserSpaceBox {
     pub top: f64,
 }
 
+impl UserSpaceBox {
+    /// The smallest box around `points`, or `None` without points.
+    pub fn bounding(points: impl IntoIterator<Item = (f64, f64)>) -> Option<Self> {
+        let boxes = points.into_iter().map(|(x, y)| Self {
+            left: x,
+            bottom: y,
+            right: x,
+            top: y,
+        });
+        boxes.reduce(|bounds, point| bounds.union(&point))
+    }
+
+    /// The smallest box around both `self` and `other`.
+    pub fn union(&self, other: &Self) -> Self {
+        Self {
+            left: self.left.min(other.left),
+            bottom: self.bottom.min(other.bottom),
+            right: self.right.max(other.right),
+            top: self.top.max(other.top),
+        }
+    }
+
+    /// What `self` and `other` have in common, which has no area if they
+    /// have nothing in common.
+    pub fn intersection(&self, other: &Self) -> Self {
+        let left = self.left.max(other.left);
+        let bottom = self.bottom.max(other.bottom);
+        Self {
+            left,
+            bottom,
+            right: self.right.min(other.right).max(left),
+            top: self.top.min(other.top).max(bottom),
+        }
+    }
+
+    /// The box that reaches `distance` further out on every side.
+    pub fn grown_by(&self, distance: f64) -> Self {
+        Self {
+            left: self.left - distance,
+            bottom: self.bottom - distance,
+            right: self.right + distance,
+            top: self.top + distance,
+        }
+    }
+}
+
 /// Maps PDF user space positions on one page to page space.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct PageSpace {
@@ -119,6 +165,34 @@ mod tests {
     fn rotation_is_taken_modulo_a_full_turn() {
         assert_eq!(convert(-1), convert(3));
         assert_eq!(convert(5), convert(1));
+    }
+
+    #[test]
+    fn box_around_points_and_boxes_covers_them() {
+        let around = UserSpaceBox::bounding([(3.0, 8.0), (1.0, 9.0), (2.0, 7.0)]).unwrap();
+        let expected = UserSpaceBox {
+            left: 1.0,
+            bottom: 7.0,
+            right: 3.0,
+            top: 9.0,
+        };
+        assert_eq!(around, expected);
+        assert_eq!(around.union(&VISIBLE).left, 1.0);
+        assert_eq!(UserSpaceBox::bounding([]), None);
+    }
+
+    #[test]
+    fn boxes_that_share_nothing_intersect_in_no_area() {
+        let far = UserSpaceBox {
+            left: 500.0,
+            bottom: 500.0,
+            right: 600.0,
+            top: 600.0,
+        };
+        let common = VISIBLE.intersection(&far);
+        assert_eq!((common.left, common.right), (500.0, 500.0));
+        assert_eq!((common.bottom, common.top), (500.0, 500.0));
+        assert_eq!(VISIBLE.intersection(&VISIBLE), VISIBLE);
     }
 
     #[test]

@@ -5,9 +5,22 @@
 //! [page space](crate::geometry), with nothing engine-specific in it, so that
 //! two engines can be compared by comparing what they report.
 
+mod content;
+mod document;
+mod figures;
+mod fonts;
+mod matrix;
+mod page_space;
 pub mod pdfium;
+mod structure;
+#[cfg(test)]
+mod testing;
+mod text;
+mod text_string;
 
 use std::fmt;
+
+pub use self::document::{Document, Pages};
 
 use crate::geometry::{Rect, Size};
 

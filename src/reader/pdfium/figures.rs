@@ -1,18 +1,17 @@
 //! The figures of a page.
 
-mod loose;
-
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::ffi::c_int;
 use std::hash::{Hash, Hasher};
 
 use super::handles::{Mark, ObjectKind, PageObject};
-use super::matrix::Matrix;
 use super::objects::PageObjects;
-use super::page_space::{PageSpace, UserSpaceBox};
 use super::structure::Structure;
 use crate::geometry::Rect;
+use crate::reader::figures::loose;
+use crate::reader::matrix::Matrix;
+use crate::reader::page_space::{PageSpace, UserSpaceBox};
 use crate::reader::{Figure, FigureKind};
 
 /// A figure, and the index among the objects of its page of the first

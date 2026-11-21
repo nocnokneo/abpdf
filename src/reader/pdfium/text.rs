@@ -5,8 +5,8 @@ use std::ffi::c_int;
 
 use super::handles::{LoadedPage, PageObject, TextPage};
 use super::objects::PageObjects;
-use super::page_space::PageSpace;
 use super::structure::Structure;
+use crate::reader::page_space::PageSpace;
 use crate::reader::{Char, Span, Style, TextItem};
 
 /// What PDFium reports in place of a hyphen that it takes to end a line

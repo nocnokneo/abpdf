@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use super::handles::{LoadedPage, ObjectKind, PageObject};
-use super::matrix::Matrix;
+use crate::reader::matrix::Matrix;
 
 /// Forms inside forms deeper than this are not looked into, so that a
 /// malformed PDF cannot exhaust the stack.

@@ -15,10 +15,10 @@ use pdfium_render::prelude::{
 };
 
 use super::library::Library;
-use super::matrix::Matrix;
-use super::page_space::UserSpaceBox;
 use super::strings;
 use crate::reader::Color;
+use crate::reader::matrix::Matrix;
+use crate::reader::page_space::UserSpaceBox;
 
 pub(super) struct LoadedPage<'a> {
     pdfium: &'a Library,
@@ -287,7 +287,14 @@ impl<'a> PageObject<'a> {
     pub fn matrix(&self) -> Matrix {
         let mut matrix = IDENTITY_MATRIX;
         unsafe { self.pdfium.FPDFPageObj_GetMatrix(self.handle, &mut matrix) };
-        matrix.into()
+        Matrix {
+            a: matrix.a.into(),
+            b: matrix.b.into(),
+            c: matrix.c.into(),
+            d: matrix.d.into(),
+            e: matrix.e.into(),
+            f: matrix.f.into(),
+        }
     }
 
     /// The objects of a form, in the order in which it draws them.

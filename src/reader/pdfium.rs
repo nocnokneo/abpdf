@@ -3,9 +3,7 @@
 mod figures;
 mod handles;
 mod library;
-mod matrix;
 mod objects;
-mod page_space;
 mod strings;
 mod structure;
 mod text;
@@ -20,7 +18,7 @@ use self::handles::LoadedPage;
 pub use self::library::LIBRARY_PATH_VARIABLE;
 use self::library::LoadedLibrary;
 use self::objects::PageObjects;
-use self::page_space::PageSpace;
+use super::page_space::PageSpace;
 use super::{Page, ReadError, Reader};
 
 /// `FPDF_GetLastError`'s value for a document that needs a password.
