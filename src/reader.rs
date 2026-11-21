@@ -57,9 +57,11 @@ pub enum TextItem {
     Figure(usize),
 }
 
-/// A picture on a page that the producer keeps together: an image, or a
-/// drawing of several shapes or images.
+/// A picture on a page: an image, or a drawing of shapes, images or both.
 ///
+/// One figure is what the producer keeps together, or what the page draws
+/// in one go of shapes that nothing keeps together, unless those only rule
+/// and box text.
 /// Text in a figure is not part of it: it is among the text of its page.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Figure {
