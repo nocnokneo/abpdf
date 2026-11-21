@@ -24,3 +24,11 @@ unicode-segmentation = "1"
 
 [dev-dependencies]
 pdf-writer = "0.15"
+
+# What a release is built with: slower to build, and smaller and faster to
+# run.
+[profile.dist]
+inherits = "release"
+codegen-units = 1
+lto = true
+strip = true

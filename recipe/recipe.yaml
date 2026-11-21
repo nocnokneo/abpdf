@@ -1,0 +1,46 @@
+# The conda package of abpdf, which rattler-build builds from this checkout:
+#
+#     ABPDF_VERSION=1.2.3 rattler-build build --recipe recipe/recipe.yaml
+#
+# The release workflow sets the version to that of Cargo.toml.
+schema_version: 1
+
+context:
+  version: ${{ env.get("ABPDF_VERSION") }}
+
+package:
+  name: abpdf
+  version: ${{ version }}
+
+source:
+  path: ..
+
+build:
+  number: 0
+  script:
+    # The licenses of the crates that are built into the program.
+    - cargo-bundle-licenses --format yaml --output THIRDPARTY.yml
+    - if: unix
+      then: cargo install --locked --profile dist --no-track --root "$PREFIX" --path .
+    - if: win
+      then: cargo install --locked --profile dist --no-track --root "%LIBRARY_PREFIX%" --path .
+
+requirements:
+  build:
+    - ${{ compiler('rust') }}
+    # Rust links with the linker of the C compiler.
+    - ${{ compiler('c') }}
+    - cargo-bundle-licenses
+
+tests:
+  - script:
+      - abpdf --version
+
+about:
+  homepage: https://github.com/nocnokneo/abpdf
+  repository: https://github.com/nocnokneo/abpdf
+  license: MIT
+  license_file:
+    - LICENSE
+    - THIRDPARTY.yml
+  summary: Compare two PDFs and get a side-by-side redline PDF

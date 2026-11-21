@@ -240,3 +240,7 @@ Two readers that are there to take were not enough:
    - Held against PDFium on 207 documents of a dozen producers that were at hand, among them pdfTeX, Word, LibreOffice, Apache FOP and Chrome, the reader differs in 2 of 1000 tokens.
      Most are spaces that PDFium does not find and indices that it does not set apart.
    - Not done: text that is drawn twice to look bold reads twice, and text that is written from the top down has a box of a guessed width.
+   - The tag of a version builds its release: archives of the one binary for Linux, Windows and macOS, and conda packages for the same platforms.
+     The binary for Linux is linked against musl, so that it runs on any Linux, which costs a third of its speed, and the one in the conda package is not.
+   - A channel on prefix.dev is the short way to a package that pixi installs by its name, until abpdf is on conda-forge, which takes a public repository.
+     Without a channel, pixi builds abpdf from its source.
