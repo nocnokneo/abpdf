@@ -121,7 +121,7 @@ jobs:
         shell: bash
         run: |
           mkdir "$NAME"
-          cp "$BINARY" LICENSE README.md CHANGELOG.md THIRDPARTY.yml "$NAME"
+          cp "$BINARY" LICENSE NOTICES assets/fonts/DejaVuSans-LICENSE.txt README.md CHANGELOG.md THIRDPARTY.yml "$NAME"
           if [ "$RUNNER_OS" = Windows ]; then
             7z a "$NAME.zip" "$NAME"
           else

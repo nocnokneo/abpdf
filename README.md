@@ -244,4 +244,9 @@ The variable holds the name of the channel as its address has it after `https://
 
 [MIT](LICENSE)
 
-abpdf embeds the DejaVu Sans font, which has [its own license](assets/fonts/DejaVuSans-LICENSE.txt).
+abpdf embeds data that has licenses of its own:
+
+- the DejaVu Sans font, under [its license](assets/fonts/DejaVuSans-LICENSE.txt)
+- the standard fonts of PDF and the CMaps of Adobe, which crates that abpdf is built with bring along, under the licenses in [NOTICES](NOTICES)
+
+The archives and the conda packages of a release carry these licenses, and those of the crates.

@@ -42,5 +42,7 @@ about:
   license: MIT
   license_file:
     - LICENSE
+    - NOTICES
+    - assets/fonts/DejaVuSans-LICENSE.txt
     - THIRDPARTY.yml
   summary: Compare two PDFs and get a side-by-side redline PDF
