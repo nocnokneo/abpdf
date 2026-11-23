@@ -16,7 +16,7 @@ Conventions:
 * Recommended stack: **Rust**, reading with **PDFium** through `pdfium-render`, writing with **krilla** (Typst's PDF writer) using its `pdf` feature, which embeds source pages as form XObjects through `hayro-write`.
 * Keep the reader behind a narrow page-model boundary so the pure-Rust `hayro-interpret` can replace PDFium later and make a single static binary possible.
 * Diff the whole document as one token stream with the **histogram** algorithm (`imara-diff`), then apply diff-match-patch-style **semantic cleanup**, word-to-character refinement, and a moved-block pass.
-* Typst marks page headers, footers and automatic hyphenation as tagged-PDF **artifacts**, so for our own documents header/footer exclusion and de-hyphenation can be exact instead of heuristic [TY1].
+* Typst marks page headers, footers and automatic hyphenation as tagged-PDF **artifacts**, so for documents that Typst generates, header/footer exclusion and de-hyphenation can be exact instead of heuristic [TY1].
 * Main risks:
   1. Word segmentation and reading order that differ between two layouts of the same text.
   2. PDFium distribution, because prebuilt binaries are dynamic-only.
@@ -26,7 +26,7 @@ Conventions:
 
 ---
 
-## 1. i-net PDFC feature semantics (our feature spec)
+## 1. i-net PDFC feature semantics (the reference for the features)
 
 ### 1.1 Comparison mode
 
@@ -38,7 +38,7 @@ Conventions:
 | `TOLERANCE_PAGE_LEFTCORNER` / `_RATIO` / `_SIZE` | 3 px / 0.01 / 2 px | Strict mode only: tolerances for page margins, aspect ratio and size. | [P1] |
 
 **Inference:** `CONTINUOUS_DETECT_PAGES` suggests PDFC aligns in windows of pages instead of one global sequence alignment by default.
-For 650 pages, a global token diff is cheap enough in a compiled language (see §4.1), so we need not copy the windowing.
+For 650 pages, a global token diff is cheap enough in a compiled language (see §4.1), so the windowing need not be copied.
 
 ### 1.2 Filters (`FILTERS` property, comma-separated)
 
@@ -73,7 +73,7 @@ Filters are described as an optional feature of continuous mode [P1].
 * The documentation's example for page numbers is `Page: (\d+) of (\d+)` [P3].
 
 Design note (**inference**): because matching runs over the page text, the extractor must keep a mapping from text offsets to glyphs.
-For our cross-references `(p. 351)`, a pattern like `\(p\. (\d+)\)` removes only the number and keeps "(p." as an anchor, which is exactly the PDFC capture-group behaviour.
+For cross-references such as `(p. 351)`, a pattern like `\(p\. (\d+)\)` removes only the number and keeps "(p." as an anchor, which is exactly the PDFC capture-group behaviour.
 
 ### 1.4 Compare types and style comparison
 
@@ -169,7 +169,7 @@ That is cheap from Rust but likely tens of seconds from pure Python loops (**est
 * Commercial: unipdf, i-net PDFC.
 * MPL-2.0 (pikepdf) has file-level copyleft and is compatible with an MIT/Apache tool used as a dependency (**inference**).
 
-### 2.3 Tagged PDF matters for our inputs
+### 2.3 Tagged PDF matters for Typst inputs
 
 * Typst writes tagged PDFs by default [TY1].
 * Typst "automatically tags many layout artifacts such as headers, footers, page back- and foregrounds, and automatic hyphenation as artifacts" [TY1].
@@ -203,7 +203,7 @@ Then place it with a `cm` matrix on a new landscape page and draw overlays after
 * **Annotations and links are lost.**
   A form XObject captures only the content stream.
   pikepdf notes that composing inside the existing document is needed to keep "annotations and hyperlinks" [PIKE-OV].
-  We would re-create links (TOC, cross-references) as Link annotations transformed into output coordinates if wanted (**inference**).
+  Links (TOC, cross-references) would be re-created as Link annotations transformed into output coordinates if wanted (**inference**).
 * **Page boxes and rotation.**
   Placement must honour CropBox/TrimBox, `/Rotate` and `/UserUnit`; qpdf exposes these explicitly [QPDF-H].
   When PDFium reads and hayro-write embeds, both must agree on the visible box, or highlights drift (**inference**; a main risk).
@@ -384,8 +384,8 @@ Recommended pipeline (**inference**, built from the sources above):
    Add markup annotations either upstream in krilla or with a small `lopdf` post-pass [CR].
    Fall back to PDFium's XObject and annotation APIs if a spike shows coordinate or size problems [H-PPO], [H-ANNOT].
 4. **Diff: `imara-diff` (histogram)** for the global word stream [IMARA], plus `similar` for anchored, character-level and inline refinement [SIMILAR].
-   Write our own semantic cleanup following Fraser [FRASER], or reuse `dissimilar` for character-level cleanup [CR].
-5. **Prototype quickly in Python with pypdfium2 + pikepdf** if the team wants to tune heuristics first.
+   Write a semantic cleanup following Fraser [FRASER], or reuse `dissimilar` for character-level cleanup [CR].
+5. **Prototype quickly in Python with pypdfium2 + pikepdf** to tune heuristics first.
    It uses the same PDFium semantics, so the logic transfers (**inference**).
 6. **Later:** implement a `PageModel` backend on `hayro-interpret` and run both backends against each other in CI (differential testing).
    Switch the default once the outputs agree, to get a pure-Rust static binary.
@@ -404,7 +404,7 @@ Distribution for A (**inference**):
 | 2 | False replaces and chaff across 260 k tokens | Histogram anchors, semantic cleanup [FRASER], structure anchors, move detection. |
 | 3 | PDFium packaging: dynamic-only prebuilt binaries [PDFIUM-BIN]; not thread-safe [PR-README] | Ship the library alongside the binary; parallelize with processes; move to hayro later. |
 | 4 | PDFium (reader) and hayro-write (embedder) disagree on page box or rotation, so highlights drift | Normalize to one CropBox-based coordinate system; test rotated and cropped fixtures; fall back to PDFium XObjects. |
-| 5 | Output size from per-page resource copies | Measure early on the 650-page pair; deduplicate shared objects. |
+| 5 | Output size from per-page resource copies | Measure early on a 650-page pair; deduplicate shared objects. |
 | 6 | Vector-drawing diff is noisy (PDFC needed `SOLVEFALSEREPLACE` [P5]) | Treat figures as atomic tokens and confirm with pixel diff (§4.7). |
 | 7 | Young crates: hayro 0.9, krilla 0.8, PDFium editing APIs marked "Experimental" | Pin versions; keep backends swappable; contribute upstream. |
 | 8 | Encrypted inputs unsupported by hayro [HAYRO-SYN] | Decrypt through PDFium or qpdf before embedding. |
@@ -418,7 +418,7 @@ All are **inference**: design ideas made cheap by the components above.
 * **Change model as the hub**: one JSON document listing each change with kind (insert, delete, replace, move, style, image, figure), old and new page plus quads, text, and section path.
   Every output (PDF, HTML, CI) renders from it.
 * **CI gating**: exit code 0 = no differences, 1 = differences, 2 = error, following GNU `diff` [GNUDIFF].
-  Add `--fail-on=text,style,image` and a Markdown summary for MR comments.
+  Add `--fail-on=text,style,image` and a Markdown summary for a comment on a code review.
 * **git integration**:
   * `textconv` gives text-only `git diff`.
   * A `diff.<driver>.command` (or `GIT_EXTERNAL_DIFF`) launches the visual redline [GITATTR].
