@@ -74,6 +74,11 @@ A band across the gutter joins the two sides of a change and has its number in t
 With `--audit`, the redline also shows what was left out of the comparison, to check the profile with.
 Text that was left out has an outline in a color that tells why, which the summary explains, and the pages without a change are shown too.
 
+Before a redline is passed on, mind what it holds of the documents:
+
+- It holds objects of the documents that none of its pages shows, such as embedded files, form fields and scripts, although nothing in it leads to them.
+- It is not encrypted, even if a document was, so that what a document forbids, such as copying its text, a redline allows.
+
 ### What is compared
 
 abpdf compares words and punctuation marks, and ignores how the text is broken into lines and pages.
@@ -137,6 +142,9 @@ Whether shapes are a drawing is a guess, because the PDF does not say, and it ha
 
 In a tagged PDF, a change does not go from one table cell into the next: where the text of several cells changes, each cell is a change of its own.
 Without tags nothing tells the cells apart, and changed cells that follow each other are one change.
+
+abpdf is an aid for reviewing one's own revisions, and no means to find out whether someone who is not trusted has changed a document.
+Such a person can make a change that abpdf does not report: abpdf compares the characters that a font says its glyphs stand for and not the shapes of the glyphs, and it leaves out what a document marks as an artifact.
 
 ### Profile
 
