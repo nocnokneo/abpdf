@@ -5,15 +5,18 @@ Compare `a.pdf` with `b.pdf` and get a side-by-side redline PDF.
 abpdf compares the text and the figures of two PDFs as one continuous flow, so content that moves to another page because something was inserted before it is not reported as a change.
 It is meant for revisions of generated documents: specifications, manuals, reports.
 
-**Status: under construction.**
-[docs/design.md](docs/design.md) describes what is planned and why, and its order of work shows what is done.
+[docs/design.md](docs/design.md) describes how abpdf works and why.
 
 ## Install
 
 abpdf is one program, with nothing to install next to it.
 
 - Download the archive for your platform from the [releases](https://github.com/nocnokneo/abpdf/releases), unpack it, and put `abpdf` where your shell finds it.
-- Or let [pixi](https://pixi.sh) build it from the source and install it as a tool:
+- Or install its conda package as a tool with [pixi](https://pixi.sh):
+
+      pixi global install --channel https://prefix.dev/nocnokneo/abpdf --channel conda-forge abpdf
+
+- Or let pixi build it from the source:
 
       pixi global install --git https://github.com/nocnokneo/abpdf.git --build-backend pixi-build-rust abpdf
 
@@ -226,6 +229,7 @@ The [release workflow](.github/workflows/release.yml) then builds abpdf for Linu
 
 The conda packages are built from [recipe/recipe.yaml](recipe/recipe.yaml).
 The workflow uploads them to a channel on [prefix.dev](https://prefix.dev) if the repository variable `PREFIX_CHANNEL` names one, and if that channel has the workflow as a trusted publisher.
+The variable holds the name of the channel as its address has it after `https://prefix.dev/`, and not the address.
 
 ## License
 
