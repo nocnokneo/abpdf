@@ -1,0 +1,194 @@
+name: Release
+
+# Builds what a release is made of: the program for each platform, as an
+# archive and as a conda package.
+# A tag `vX.Y.Z` publishes them as a GitHub release with the notes that
+# CHANGELOG.md has for the version.
+# A pull request that changes how a release is built builds one without
+# publishing it.
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - recipe/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.manifest.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: manifest
+        run: echo "version=$(grep -m 1 '^version = ' Cargo.toml | cut -d '"' -f 2)" >> "$GITHUB_OUTPUT"
+      - name: The tag names the version, and the changelog has notes for it
+        if: github.ref_type == 'tag'
+        env:
+          VERSION: ${{ steps.manifest.outputs.version }}
+        run: |
+          test "$GITHUB_REF_NAME" = "v$VERSION"
+          grep --quiet --fixed-strings "## [$VERSION]" CHANGELOG.md
+
+  licenses:
+    name: licenses of the dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+      - run: cargo install --locked cargo-bundle-licenses@5.0.0
+      - run: cargo bundle-licenses --format yaml --output THIRDPARTY.yml
+      - uses: actions/upload-artifact@v7
+        with:
+          name: licenses
+          path: THIRDPARTY.yml
+
+  archive:
+    name: archive for ${{ matrix.target }}
+    needs: [version, licenses]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linked against musl, so that it runs on any Linux.
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          # With the C runtime linked in, so that it needs no library next
+          # to it.
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            rustflags: -C target-feature=+crt-static
+            extension: .exe
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+    env:
+      NAME: abpdf-${{ needs.version.outputs.version }}-${{ matrix.target }}
+      BINARY: target/${{ matrix.target }}/dist/abpdf${{ matrix.extension }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+      - run: rustup target add ${{ matrix.target }}
+      - run: cargo build --locked --profile dist --target ${{ matrix.target }}
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+      - name: The program runs and finds the changes of the test corpus
+        shell: bash
+        run: |
+          "$BINARY" --version
+          status=0
+          "$BINARY" tests/corpus/revisions-old-tagged.pdf tests/corpus/revisions-new-tagged.pdf || status=$?
+          test "$status" = 1
+      - uses: actions/download-artifact@v8
+        with:
+          name: licenses
+      - name: Pack the archive
+        shell: bash
+        run: |
+          mkdir "$NAME"
+          cp "$BINARY" LICENSE README.md CHANGELOG.md THIRDPARTY.yml "$NAME"
+          if [ "$RUNNER_OS" = Windows ]; then
+            7z a "$NAME.zip" "$NAME"
+          else
+            tar -czf "$NAME.tar.gz" "$NAME"
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: archive-${{ matrix.target }}
+          path: |
+            ${{ env.NAME }}.tar.gz
+            ${{ env.NAME }}.zip
+
+  conda:
+    name: conda package for ${{ matrix.platform }}
+    needs: version
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-64
+            os: ubuntu-latest
+          - platform: win-64
+            os: windows-latest
+          - platform: osx-arm64
+            os: macos-latest
+          - platform: osx-64
+            os: macos-15-intel
+    steps:
+      - uses: actions/checkout@v7
+      - uses: prefix-dev/rattler-build-action@v0.2.39
+        with:
+          recipe-path: recipe/recipe.yaml
+          artifact-name: conda-${{ matrix.platform }}
+          build-args: --target-platform ${{ matrix.platform }}
+        env:
+          ABPDF_VERSION: ${{ needs.version.outputs.version }}
+
+  release:
+    name: release on GitHub
+    if: github.ref_type == 'tag'
+    needs: [version, archive, conda]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: archive-*
+          path: assets
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: conda-*
+          path: assets
+          merge-multiple: true
+      - name: Take the notes of the version from the changelog
+        run: |
+          awk -v heading="## [$VERSION]" '
+            /^## \[/ { is_of_version = index($0, heading) == 1; next }
+            is_of_version
+          ' CHANGELOG.md > notes.md
+      - run: |
+          find assets -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.conda' \) -print0 |
+            xargs -0 gh release create "$GITHUB_REF_NAME" --title "abpdf $VERSION" --notes-file notes.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  channel:
+    name: conda channel
+    # The repository variable PREFIX_CHANNEL names a channel on prefix.dev
+    # to publish the conda packages on, which has this workflow as a
+    # trusted publisher.
+    if: github.ref_type == 'tag' && vars.PREFIX_CHANNEL != ''
+    needs: [conda, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: conda-*
+          path: packages
+          merge-multiple: true
+      - uses: prefix-dev/rattler-build-action@v0.2.39
+        with:
+          setup-only: true
+      - run: |
+          find packages -name '*.conda' -print0 |
+            xargs -0 -n 1 rattler-build upload prefix --channel "$PREFIX_CHANNEL"
+        env:
+          PREFIX_CHANNEL: ${{ vars.PREFIX_CHANNEL }}

@@ -8,6 +8,21 @@ It is meant for revisions of generated documents: specifications, manuals, repor
 **Status: under construction.**
 [docs/design.md](docs/design.md) describes what is planned and why, and its order of work shows what is done.
 
+## Install
+
+abpdf is one program, with nothing to install next to it.
+
+- Download the archive for your platform from the [releases](https://github.com/nocnokneo/abpdf/releases), unpack it, and put `abpdf` where your shell finds it.
+- Or let [pixi](https://pixi.sh) build it from the source and install it as a tool:
+
+      pixi global install --git https://github.com/nocnokneo/abpdf.git --build-backend pixi-build-rust abpdf
+
+- Or build it with Cargo:
+
+      cargo install --git https://github.com/nocnokneo/abpdf.git
+
+[CHANGELOG.md](CHANGELOG.md) says what each release changes.
+
 ## Usage
 
     abpdf old.pdf new.pdf -o redline.pdf
@@ -198,6 +213,19 @@ The examples show what abpdf reads from a PDF:
 
     cargo run --example tokens -- document.pdf
     cargo run --release --example token_overlay -- old.pdf new.pdf overlay.pdf
+
+### Releases
+
+The tag of a version builds its release:
+
+1. Set the version in `Cargo.toml`, and run `cargo check` so that `Cargo.lock` has it too.
+2. In `CHANGELOG.md`, put what is under `Unreleased` under a heading for the version, such as `## [1.2.3] - 2026-12-01`.
+3. Commit both, tag the commit `v1.2.3` and push the tag.
+
+The [release workflow](.github/workflows/release.yml) then builds abpdf for Linux, Windows and macOS, as archives and as conda packages, and publishes them as a GitHub release whose notes are what the changelog says about the version.
+
+The conda packages are built from [recipe/recipe.yaml](recipe/recipe.yaml).
+The workflow uploads them to a channel on [prefix.dev](https://prefix.dev) if the repository variable `PREFIX_CHANNEL` names one, and if that channel has the workflow as a trusted publisher.
 
 ## License
 
