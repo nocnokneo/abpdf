@@ -1,5 +1,6 @@
 //! A PDF document and its pages.
 
+use std::iter::Enumerate;
 use std::slice;
 use std::sync::Arc;
 
@@ -9,7 +10,7 @@ use hayro_syntax::{DecryptionError, LoadPdfError, Pdf};
 
 use super::page_space::{PageSpace, UserSpaceBox};
 use super::structure::StructureTree;
-use super::{Page, ReadError, content, figures, text};
+use super::{Page, PageLimit, ReadError, content, figures, text};
 
 /// One opened PDF document.
 pub struct Document {
@@ -46,7 +47,7 @@ impl Document {
     pub fn pages(&self) -> Pages<'_> {
         let catalog = catalog_of(&self.pdf).filter(|_| self.is_tagged);
         Pages {
-            pages: self.pdf.pages().iter(),
+            pages: self.pdf.pages().iter().enumerate(),
             shared: content::Shared::new(),
             structure: catalog.map_or_else(StructureTree::default, |catalog| {
                 StructureTree::read(&catalog)
@@ -64,31 +65,39 @@ fn catalog_of(pdf: &Pdf) -> Option<Dict<'_>> {
 ///
 /// What pages share, such as their fonts, is read once.
 pub struct Pages<'a> {
-    pages: slice::Iter<'a, PdfPage<'a>>,
+    pages: Enumerate<slice::Iter<'a, PdfPage<'a>>>,
     shared: content::Shared<'a>,
     /// What the structure tree says, which is nothing for a document that
     /// is not tagged.
     structure: StructureTree,
 }
 
-impl Iterator for Pages<'_> {
-    type Item = Page;
-
-    fn next(&mut self) -> Option<Page> {
-        let page = self.pages.next()?;
+impl<'a> Pages<'a> {
+    fn read(&self, page: &PdfPage<'a>) -> Result<Page, PageLimit> {
         let visible = visible_box_of(page);
         let page_space = PageSpace::new(visible, clockwise_quarter_turns_of(page));
         let structure = self.structure.of_page(page.raw());
-        let objects = content::objects_of(page, &self.shared, visible);
+        let objects = content::objects_of(page, &self.shared, visible)?;
         let figures = figures::read(&objects, &page_space, structure);
         let figure_objects: Vec<usize> = figures.iter().map(|found| found.first_object).collect();
         let (spans, text) = text::read(&objects, &page_space, structure, &figure_objects);
-        Some(Page {
+        Ok(Page {
             size: page_space.size(),
             spans,
             figures: figures.into_iter().map(|found| found.figure).collect(),
             text,
         })
+    }
+}
+
+impl Iterator for Pages<'_> {
+    type Item = Result<Page, ReadError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (page_index, page) = self.pages.next()?;
+        let page_number = page_index + 1;
+        let read = self.read(page);
+        Some(read.map_err(|limit| ReadError::PageBeyondLimit { page_number, limit }))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -143,6 +152,11 @@ mod tests {
         Document::open(pdf_of(&objects)).expect("the PDF opens")
     }
 
+    fn first_page(document: &Document) -> Page {
+        let page = document.pages().next().expect("the document has a page");
+        page.expect("the page is read")
+    }
+
     fn characters(page: &Page) -> Vec<crate::reader::Char> {
         let items = page.text.iter();
         items
@@ -159,7 +173,9 @@ mod tests {
         assert_eq!(document.page_count(), 2);
         let pages = document.pages();
         assert_eq!(pages.len(), 2);
-        let texts: Vec<char> = pages.map(|page| characters(&page)[0].text).collect();
+        let texts: Vec<char> = pages
+            .map(|page| characters(&page.expect("the page is read"))[0].text)
+            .collect();
         assert_eq!(texts, ['a', 'b']);
     }
 
@@ -175,7 +191,7 @@ mod tests {
         // The visible part is 100 wide and 200 high, and is shown turned
         // by a quarter.
         let document = two_pages("", "/CropBox [10 20 110 220] /Rotate 90");
-        let page = document.pages().next().expect("the document has pages");
+        let page = first_page(&document);
         assert_eq!((page.size.width, page.size.height), (200.0, 100.0));
         // The letter starts 10 right of and 80 above the bottom left
         // corner of the visible part, which is the top left one once the
@@ -200,8 +216,7 @@ mod tests {
                 stream("", "/P << /MCID 0 >> BDC BT /F1 10 Tf (a) Tj ET EMC"),
             ];
             let document = Document::open(pdf_of(&objects)).expect("the PDF opens");
-            let page = document.pages().next().expect("the document has a page");
-            page.spans[0].structure_path.clone()
+            first_page(&document).spans[0].structure_path.clone()
         };
         assert_eq!(path_of_first_span(tree), None);
         let tagged = format!("{tree} /MarkInfo << /Marked true >>");
@@ -211,8 +226,34 @@ mod tests {
     #[test]
     fn page_without_content_has_none() {
         let document = Document::open(page_pdf("", "", &[])).expect("the PDF opens");
-        let page = document.pages().next().expect("the document has a page");
+        let page = first_page(&document);
         assert!(page.text.is_empty() && page.figures.is_empty() && page.spans.is_empty());
+    }
+
+    #[test]
+    fn page_beyond_a_limit_is_not_read_and_is_named() {
+        let too_many_saved_states = "q ".repeat(content::MAX_SAVED_STATE_DEPTH + 1);
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
+            "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 200 300] >>".to_owned(),
+            "<< /Type /Page /Parent 2 0 R /Contents 5 0 R >>".to_owned(),
+            "<< /Type /Page /Parent 2 0 R /Contents 6 0 R >>".to_owned(),
+            stream("", "q Q"),
+            stream("", &too_many_saved_states),
+        ];
+        let document = Document::open(pdf_of(&objects)).expect("the PDF opens");
+        let pages: Vec<Result<Page, ReadError>> = document.pages().collect();
+        assert!(pages[0].is_ok());
+        let error = pages[1]
+            .as_ref()
+            .expect_err("the second page is beyond a limit");
+        assert!(matches!(
+            error,
+            ReadError::PageBeyondLimit {
+                page_number: 2,
+                limit: PageLimit::SavedStateDepth
+            }
+        ));
     }
 
     #[test]

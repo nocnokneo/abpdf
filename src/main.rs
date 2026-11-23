@@ -160,7 +160,7 @@ fn destination(path: &Path) -> Option<PathBuf> {
 fn read(path: &Path) -> Result<(Arc<Vec<u8>>, RawFlow), String> {
     let pdf = Arc::new(fs::read(path).map_err(|error| in_file(path, error))?);
     let document = Document::open(pdf.clone()).map_err(|error| in_file(path, error))?;
-    let flow = RawFlow::read(&document);
+    let flow = RawFlow::read(&document).map_err(|error| in_file(path, error))?;
     Ok((pdf, flow))
 }
 

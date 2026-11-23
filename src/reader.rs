@@ -27,6 +27,38 @@ pub enum ReadError {
     InvalidDocument,
     #[error("the PDF is password protected")]
     PasswordProtected,
+    /// A page that goes beyond a limit is not read in part, so that no
+    /// change can hide in what would not be read.
+    #[error("page {page_number} goes beyond what abpdf reads of a page: {limit}")]
+    PageBeyondLimit {
+        /// Counted from 1.
+        page_number: usize,
+        limit: PageLimit,
+    },
+}
+
+/// A limit of what abpdf reads of a page, which keeps a hostile PDF from
+/// taking all the memory or the time of the machine.
+/// Honest pages stay far below every limit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum PageLimit {
+    #[error(
+        "more than {} MiB of content, counting a form each time it is drawn",
+        content::MAX_CONTENT_BYTES_PER_PAGE >> 20
+    )]
+    ContentBytes,
+    #[error("forms inside forms more than {} deep", content::MAX_FORM_DEPTH)]
+    FormDepth,
+    #[error(
+        "more than {} graphics states saved at once",
+        content::MAX_SAVED_STATE_DEPTH
+    )]
+    SavedStateDepth,
+    #[error(
+        "marked content inside marked content more than {} deep",
+        content::MAX_MARKED_CONTENT_DEPTH
+    )]
+    MarkedContentDepth,
 }
 
 /// The text and the figures of one page.

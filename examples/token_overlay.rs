@@ -28,8 +28,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let new_pdf = Arc::new(fs::read(new_path)?);
 
     let started = Instant::now();
-    let old_flow = RawFlow::read(&Document::open(old_pdf.clone())?);
-    let new_flow = RawFlow::read(&Document::open(new_pdf.clone())?);
+    let old_flow = RawFlow::read(&Document::open(old_pdf.clone())?)?;
+    let new_flow = RawFlow::read(&Document::open(new_pdf.clone())?)?;
     let read = Instant::now();
 
     let mut old_pages = sheet_pages(old_path, &old_flow).into_iter();

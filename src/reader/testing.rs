@@ -75,5 +75,6 @@ pub(super) fn objects_drawn_by(
     more_objects: &[String],
 ) -> Vec<Object> {
     let pdf = Pdf::new(page_pdf(content, resources, more_objects)).expect("the PDF opens");
-    content::objects_of(&pdf.pages()[0], &Shared::new(), PAGE)
+    let objects = content::objects_of(&pdf.pages()[0], &Shared::new(), PAGE);
+    objects.expect("the page is within the limits")
 }

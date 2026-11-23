@@ -23,7 +23,10 @@ fn untagged() -> Flow {
 /// The pages of a PDF of the corpus as the reader reports them.
 fn pages_of(file_name: &str) -> Vec<Page> {
     let document = Document::open(corpus(file_name)).expect("the PDF opens");
-    document.pages().collect()
+    document
+        .pages()
+        .collect::<Result<_, _>>()
+        .expect("the pages are read")
 }
 
 /// The span of the character with which a page first reads `text`.
