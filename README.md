@@ -1,4 +1,4 @@
-# abpdf
+<h1 align="center"><img src="docs/logo/abpdf-with-name.svg" alt="abpdf" width="320"></h1>
 
 Compare `a.pdf` with `b.pdf` and get a side-by-side redline PDF.
 
