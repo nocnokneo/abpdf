@@ -21,8 +21,8 @@ pub enum ProfileError {
     Unreadable(#[from] io::Error),
     #[error("{0}")]
     Syntax(#[from] toml::de::Error),
-    #[error("{name} is {value}, but a height cannot be negative")]
-    NegativeHeight { name: &'static str, value: f32 },
+    #[error("{name} is {value}, but a height is a number from 0 up")]
+    ImpossibleHeight { name: &'static str, value: f32 },
     #[error("ignore pattern {number} is not a regular expression: {source}")]
     Pattern { number: usize, source: regex::Error },
 }
@@ -50,8 +50,9 @@ impl Profile {
             ("header_height_points", file.header_height_points),
             ("footer_height_points", file.footer_height_points),
         ];
-        if let Some((name, value)) = heights.into_iter().find(|(_, value)| *value < 0.0) {
-            return Err(ProfileError::NegativeHeight { name, value });
+        let is_impossible = |value: f32| !value.is_finite() || value < 0.0;
+        if let Some((name, value)) = heights.into_iter().find(|(_, value)| is_impossible(*value)) {
+            return Err(ProfileError::ImpossibleHeight { name, value });
         }
         let ignore_patterns = file
             .ignore_patterns
@@ -109,18 +110,20 @@ mod tests {
     }
 
     #[test]
-    fn negative_height_is_an_error() {
-        let error = Profile::parse("footer_height_points = -1").unwrap_err();
-        assert!(
-            matches!(
-                error,
-                ProfileError::NegativeHeight {
-                    name: "footer_height_points",
-                    ..
-                }
-            ),
-            "{error}"
-        );
+    fn height_that_is_negative_or_no_number_is_an_error() {
+        for value in ["-1", "nan", "inf"] {
+            let error = Profile::parse(&format!("footer_height_points = {value}")).unwrap_err();
+            assert!(
+                matches!(
+                    error,
+                    ProfileError::ImpossibleHeight {
+                        name: "footer_height_points",
+                        ..
+                    }
+                ),
+                "{value}: {error}"
+            );
+        }
     }
 
     #[test]
