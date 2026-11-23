@@ -92,13 +92,22 @@ A figure is a picture that the producer of the PDF keeps together:
 - a drawing that the PDF holds as one object, which is what a PDF file that a document includes becomes
 - in a tagged PDF, the shapes that one figure tag holds
 
+A page can also draw a diagram shape by shape, with nothing that keeps the shapes together.
+That is how a diagram arrives that is made with the drawing commands of Typst.
+Such shapes are one drawing if the page draws them one after another, with nothing between them but text that stands in one of them, such as the label of a box.
+Shapes that only rule and box text are no drawing: the lines of a table, the line under underlined text, the box behind highlighted text and the frame around a note.
+Boxes with text in them are a drawing if lines join them, or if a shape without text is drawn with them, such as the head of an arrow.
+
 A figure is reported as replaced if it looks different: if it has other pixels, other shapes, or other colors or line widths.
 Where on its page it stands does not matter.
 A change names a figure as what it is, such as `[image, 640 × 480 pixels]` or `[drawing, 12 parts]`.
+Text in a figure is compared like any other text.
 
-Shapes that a page draws one by one are not compared, because nothing in the PDF says which of them belong together.
-That is how a diagram arrives that is made with the drawing commands of Typst, and how an SVG image arrives in a PDF from Typst without tags.
-Text in them is compared like any other text.
+Whether shapes are a drawing is a guess, because the PDF does not say, and it has limits:
+
+- A diagram of nothing but thin straight lines is not compared, and neither is one of nothing but boxes with text in them.
+- A table whose cells are filled and ruled is taken for a drawing, unless tags say that its text is in table cells.
+- A shape in a header or in the background of a page is compared like any other, unless the PDF marks it as part of the page.
 
 In a tagged PDF, a change does not go from one table cell into the next: where the text of several cells changes, each cell is a change of its own.
 Without tags nothing tells the cells apart, and changed cells that follow each other are one change.
@@ -126,6 +135,8 @@ ignore_patterns = [
 - A pattern is searched in the text of each page, in which the lines of the page are separated by a newline.
 - If a pattern has capture groups, only what the groups capture is ignored, and the rest of the match only says where to look.
 - A word is ignored as a whole even if only part of it is matched.
+- A word that a line break splits is searched as one word with its hyphen, such as `well-known`.
+  The hyphen is left out only where the PDF marks it as no part of the word.
 - The syntax is that of the [regex](https://docs.rs/regex/latest/regex/#syntax) crate.
 
 ### JSON

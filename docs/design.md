@@ -218,10 +218,16 @@ The reader sits behind an interface from the start so that a second implementati
    - Text in a form belongs to what is around the form: the marked content inside an included PDF is numbered apart from that of the page.
    - A page that its producer draws through one form reads as one figure with all of its shapes.
 5. Drawings of loose shapes: the shapes that a page draws one by one, which is how a diagram arrives that is made with the drawing commands of Typst.
-   What one drawing is has to be settled first.
-   Taking shapes that touch for one drawing finds the diagram box that changes in the synthetic manual, as three changes because the diagram has gaps, and takes the box behind highlighted text for a drawing.
-   It comes before a second reader, which has to report whatever a figure is.
+   Done: the revisions of the synthetic manual differ by 20 changes, of which the new one is the diagram in which a box changes, as one drawing.
+   - One drawing is what a page draws in one go: shapes one after another, with nothing between them but text that stands in one of them.
+     Shapes that touch are no measure of it, because a diagram has gaps and a box behind highlighted text touches nothing else.
+   - A drawing is told from what rules and boxes text by its shapes: a thin shape is a rule and any other shape with text in it is a box of text, and a drawing has a shape that is neither or a rule that joins a box of text to something.
+     Boxes of text alone are none, so that notes in frames one after the other are not taken for a diagram, at the price of a diagram that is nothing but labelled boxes.
+     Typst marks the shapes of a diagram as layout artifacts, the same as the rules of a table, so its marks do not tell.
+   - Tags tell two things: text in several table cells makes the shapes around it those of a table, and a shape whose artifact says where on the page it is attached, what part of the page it is or which area it takes belongs to the page.
+     PDFium does not report the type of an artifact, which is a name.
+   - The rules take plain data and know no engine: a second reader has to bring them the bounds of the shapes and the middles and table cells of the texts.
 6. `hayro` reader; release archives; packaging.
-   The reader interface passes on PDFium's marker for a hyphen that ends a line inside a word, which a second reader should not have to imitate: finding those hyphens moves to the flow.
-   Ignore patterns then see such a word as it is printed.
-   Today `well-` and `known` on two lines read as `wellknown`, which the pattern `well-known` misses.
+   Done so far: an engine reports text as it is printed, and the flow finds the hyphens that end a line inside a word, so a second reader has no marker of PDFium's to imitate.
+   - The flow also takes a hyphen at the end of a page for one, which PDFium does not, because it reads a page at a time.
+   - Ignore patterns see a word that a line break splits as one word with its hyphen, as `well-known`, and without it only where the producer marks the hyphen as no part of the word.

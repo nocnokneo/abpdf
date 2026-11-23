@@ -79,9 +79,8 @@ const SENSOR: &str = "[image, 24 × 16 pixels]";
 const CHART: &str = "[drawing, 5 parts]";
 const INCLUDED_DRAWING: &str = "[drawing, 3 parts]";
 
-/// What the edits in that source have to be reported as where the
-/// revisions are tagged.
-const FIGURE_EDITS: [Edit<'static>; 5] = [
+/// What the edits in that source have to be reported as.
+const FIGURE_EDITS: [Edit<'static>; 9] = [
     (
         Inserted,
         "",
@@ -90,10 +89,22 @@ const FIGURE_EDITS: [Edit<'static>; 5] = [
     (Replaced, SENSOR, SENSOR),
     (Replaced, CHART, CHART),
     (Replaced, INCLUDED_DRAWING, INCLUDED_DRAWING),
+    // The diagram that the page draws shape by shape, with three lines more.
+    (Replaced, "[drawing, 5 parts]", "[drawing, 8 parts]"),
+    // The note, the highlighted word and the underlined word: their frame,
+    // box and line are no drawings.
+    (
+        Replaced,
+        "stays short",
+        "needs a second line here, since this revision of the document says so much more in it \
+         than the one before did",
+    ),
+    (Replaced, "word", "phrase"),
+    (Replaced, "part", "passage"),
     (
         Inserted,
         "",
-        "[image, 24 × 16 pixels] Figure 6: The sensor of the second revision",
+        "[image, 24 × 16 pixels] Figure 8: The sensor of the second revision",
     ),
 ];
 
@@ -157,13 +168,10 @@ fn revisions_differ_by_their_edits() {
 
 #[test]
 fn figures_differ_by_their_edits() {
-    let tagged = compare(figures("tagged"), &Filters::default());
-    assert_eq!(summaries(&tagged), FIGURE_EDITS);
-    // Without tags nothing keeps the shapes of the chart together.
-    let untagged = compare(figures("untagged"), &Filters::default());
-    let edits = FIGURE_EDITS.into_iter();
-    let without_chart: Vec<Edit> = edits.filter(|edit| edit.1 != CHART).collect();
-    assert_eq!(summaries(&untagged), without_chart);
+    for tagging in ["tagged", "untagged"] {
+        let comparison = compare(figures(tagging), &Filters::default());
+        assert_eq!(summaries(&comparison), FIGURE_EDITS, "{tagging}");
+    }
 }
 
 #[test]
@@ -174,9 +182,9 @@ fn figure_that_changes_gets_a_border_on_both_pages() {
         let marks = page.marks.iter();
         marks.filter(|mark| mark.style == MarkStyle::Border).count()
     };
-    // Three figures change, and the new revision has one more.
-    assert_eq!(border_count(Side::Old), 3);
-    assert_eq!(border_count(Side::New), 4);
+    // Four figures change, and the new revision has one more.
+    assert_eq!(border_count(Side::Old), 4);
+    assert_eq!(border_count(Side::New), 5);
 }
 
 #[test]

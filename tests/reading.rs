@@ -57,10 +57,23 @@ const SENSOR: FigureKind = FigureKind::Image {
     pixel_width: 24,
     pixel_height: 16,
 };
-/// Its chart, whose shapes only tags keep together.
+/// Its chart, which is an image in the SVG format.
 const CHART: FigureKind = FigureKind::Drawing { part_count: 5 };
 /// The drawing that it includes as a PDF.
 const INCLUDED_DRAWING: FigureKind = FigureKind::Drawing { part_count: 3 };
+/// Its diagram, which the page draws shape by shape.
+const DIAGRAM: FigureKind = FigureKind::Drawing { part_count: 5 };
+
+/// The figures of its old revision.
+const FIGURES: [FigureKind; 7] = [
+    SENSOR,
+    SENSOR,
+    CHART,
+    CHART,
+    INCLUDED_DRAWING,
+    DIAGRAM,
+    DIAGRAM,
+];
 
 /// The kinds of the figures of a PDF of the corpus, in reading order.
 fn figure_kinds(file_name: &str) -> Vec<FigureKind> {
@@ -351,25 +364,26 @@ fn page_that_does_not_exist_is_an_error() {
 }
 
 #[test]
-fn images_and_included_drawings_are_figures() {
-    assert_eq!(
-        figure_kinds("figures-old-untagged.pdf"),
-        [SENSOR, SENSOR, INCLUDED_DRAWING]
-    );
+fn images_included_drawings_and_shapes_that_are_drawn_as_one_are_figures() {
+    // The frame of the note, the box of the highlighted word and the line
+    // under the underlined one are none.
+    assert_eq!(figure_kinds("figures-old-tagged.pdf"), FIGURES);
 }
 
 #[test]
-fn shapes_that_tags_keep_together_are_a_figure() {
-    assert_eq!(
-        figure_kinds("figures-old-tagged.pdf"),
-        [SENSOR, SENSOR, CHART, CHART, INCLUDED_DRAWING]
-    );
+fn shapes_of_the_page_are_figures_unless_tags_say_what_they_are() {
+    // The dot in the background and the square in the header.
+    let shape_of_the_page = FigureKind::Drawing { part_count: 1 };
+    let untagged = figure_kinds("figures-old-untagged.pdf");
+    assert_eq!(untagged[..2], [shape_of_the_page, shape_of_the_page]);
+    assert_eq!(untagged[2..], FIGURES);
 }
 
 #[test]
-fn shapes_that_nothing_keeps_together_are_no_figure() {
-    // The rules of the table and the box of the drawing.
+fn shapes_that_only_rule_and_box_text_are_no_figure() {
+    // The rules of the table and the box around the label of the drawing.
     assert_eq!(figure_kinds("reading-tagged.pdf"), []);
+    assert_eq!(figure_kinds("reading-untagged.pdf"), []);
 }
 
 #[test]
@@ -380,6 +394,8 @@ fn figure_stands_in_the_text_before_its_labels_and_its_caption() {
     assert!(contains_sequence(&texts, &start), "{texts:?}");
     let included_drawing = [FIGURE_TEXT, "Pump", "Tank", "Figure", "5"];
     assert!(contains_sequence(&texts, &included_drawing), "{texts:?}");
+    let diagram = [FIGURE_TEXT, "Sensor", "Controller", "Valve", "Figure", "6"];
+    assert!(contains_sequence(&texts, &diagram), "{texts:?}");
 }
 
 #[test]
@@ -413,14 +429,18 @@ fn figure_looks_the_same_wherever_it_stands_on_its_page() {
     // Every figure stands lower on the page of the new revision.
     let (old, new) = (figure_tokens("old"), figure_tokens("new"));
     let looks_the_same = |index: usize| old[index].looks_like(&new[index]);
-    // The second image and the second chart stay as they are.
+    // The second image, the second chart and the second diagram stay as
+    // they are.
     assert!(looks_the_same(1));
     assert!(looks_the_same(3));
-    // The first image has other pixels, a bar of the first chart grows and a
-    // box of the included drawing becomes wider.
+    assert!(looks_the_same(6));
+    // The first image has other pixels, a bar of the first chart grows, a
+    // box of the included drawing becomes wider and the first diagram gets
+    // more lines.
     assert!(!looks_the_same(0));
     assert!(!looks_the_same(2));
     assert!(!looks_the_same(4));
+    assert!(!looks_the_same(5));
 }
 
 #[test]

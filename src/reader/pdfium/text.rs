@@ -9,7 +9,8 @@ use super::page_space::PageSpace;
 use super::structure::Structure;
 use crate::reader::{Char, Span, Style, TextItem};
 
-/// What PDFium reports in place of a hyphen that ends a line inside a word.
+/// What PDFium reports in place of a hyphen that it takes to end a line
+/// inside a word, and of the line break after it.
 const LINE_END_HYPHEN_MARKER: u32 = 0x2;
 
 /// The font descriptor flag of an italic font.
@@ -76,6 +77,9 @@ impl TextReader<'_> {
                 placed_figure_count = placed_figure_count.max(figure_count);
             }
             items.extend(item);
+            if self.is_line_end_hyphen(index, code) {
+                items.push(TextItem::LineBreak);
+            }
             index += code_unit_count;
         }
         items.extend((placed_figure_count..self.figure_objects.len()).map(TextItem::Figure));
@@ -109,9 +113,18 @@ impl TextReader<'_> {
         (code, 1)
     }
 
+    /// Whether PDFium reports the character at `index` in place of a hyphen
+    /// and the line break after it.
+    fn is_line_end_hyphen(&self, index: c_int, code: u32) -> bool {
+        code == LINE_END_HYPHEN_MARKER && self.text_page.is_hyphen(index)
+    }
+
+    /// The item that the character at `index` is.
+    ///
+    /// PDFium does not say which character a hyphen is that it reports as
+    /// one that ends a line, so that is `-`; [`Span::actual_text`] can tell.
     fn read_item(&mut self, index: c_int, code: u32) -> Option<TextItem> {
-        let is_line_end_hyphen = code == LINE_END_HYPHEN_MARKER && self.text_page.is_hyphen(index);
-        let text = if is_line_end_hyphen {
+        let text = if self.is_line_end_hyphen(index, code) {
             '-'
         } else {
             match char::from_u32(code) {
@@ -126,7 +139,6 @@ impl TextReader<'_> {
             text,
             bounds: self.page_space.rect(self.text_page.loose_char_box(index)),
             span: self.span_of(index),
-            is_line_end_hyphen,
         }))
     }
 

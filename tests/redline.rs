@@ -140,12 +140,17 @@ fn assert_marks_land_on_tokens(setup: PageSetup) {
 
     let layout = layout_of_new_page(page_size);
     assert_eq!(sheet_flow.page_sizes, [layout.size], "{context}");
+    // The frame that a sheet draws around a page reads as a figure.
+    let sheet_tokens = sheet_flow.tokens.iter();
+    let words_on_sheet: Vec<_> = sheet_tokens
+        .filter(|token| token.figure.is_none())
+        .collect();
     assert_eq!(
-        texts(&sheet_flow.tokens),
+        texts(words_on_sheet.iter().copied()),
         texts(&source_flow.tokens),
         "{context}"
     );
-    for (on_sheet, on_page) in sheet_flow.tokens.iter().zip(&source_flow.tokens) {
+    for (on_sheet, on_page) in words_on_sheet.iter().zip(&source_flow.tokens) {
         let expected = layout.place(Side::New, on_page.fragments[0].bounds);
         assert_close(on_sheet.fragments[0].bounds, expected, &context);
     }
