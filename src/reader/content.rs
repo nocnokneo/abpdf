@@ -8,6 +8,7 @@
 //! by optional content or painted over.
 
 mod color;
+mod image_data;
 mod marks;
 mod path;
 mod state;
@@ -18,7 +19,7 @@ mod text;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use std::hash::Hasher;
 
 use hayro_syntax::content::TypedIter;
 use hayro_syntax::content::ops::TypedInstruction;
@@ -103,9 +104,9 @@ impl Shared<'_> {
         let known = id.and_then(|id| self.image_data_hashes.borrow().get(&id).copied());
         known.unwrap_or_else(|| {
             let mut data = DefaultHasher::new();
-            hash_data(image, &mut data);
+            image_data::hash(image, &mut data);
             if let Some(mask) = image.dict().get::<Stream>("SMask") {
-                hash_data(&mask, &mut data);
+                image_data::hash(&mask, &mut data);
             }
             let hash = data.finish();
             if let Some(id) = id {
@@ -573,13 +574,4 @@ enum TextPart<'p> {
 
 fn matrix_of(numbers: [Number; 6]) -> Matrix {
     Matrix::from(numbers.map(|number| number.as_f64()))
-}
-
-/// Takes in the data of a stream as it is without its filters.
-/// What only an image decoder can undo is taken in as it is in the file.
-fn hash_data(stream: &Stream, hasher: &mut DefaultHasher) {
-    match stream.decoded_data() {
-        Ok(data) => data.hash(hasher),
-        Err(_) => stream.raw_data().hash(hasher),
-    }
 }
