@@ -191,6 +191,124 @@ fn file_that_is_not_a_pdf_exits_with_2() {
     );
 }
 
+/// A copy of a document of the corpus that a test may lose.
+fn scratch_copy(file_name: &str) -> PathBuf {
+    let copy = scratch(file_name);
+    fs::copy(corpus("revisions-new-tagged.pdf"), &copy).unwrap();
+    copy
+}
+
+#[test]
+fn file_to_write_that_is_a_document_is_refused_and_the_document_kept() {
+    let old = corpus("revisions-old-tagged.pdf");
+    let document = scratch_copy("cli-document-to-write.pdf");
+    let content = fs::read(&document).unwrap();
+    for option in ["--output", "--json"] {
+        let output = abpdf(&[&old, &document, option.as_ref(), &document]);
+        assert_eq!(output.status.code(), Some(2), "{option}");
+        assert!(
+            stderr(&output).contains("cli-document-to-write.pdf: is a document to compare"),
+            "{}",
+            stderr(&output)
+        );
+        assert_eq!(fs::read(&document).unwrap(), content, "{option}");
+    }
+}
+
+#[test]
+fn document_is_not_removed_as_a_redline_to_leave_out() {
+    let document = scratch_copy("cli-document-to-leave-out.pdf");
+    let output = abpdf(&[
+        &document,
+        &document,
+        "--output".as_ref(),
+        &document,
+        "--only-if-different".as_ref(),
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(document.exists());
+}
+
+#[test]
+fn document_is_known_by_another_path_to_it() {
+    let document = scratch_copy("cli-document-by-another-path.pdf");
+    let directory = document.parent().unwrap();
+    let another_path = directory
+        .join("..")
+        .join(directory.file_name().unwrap())
+        .join(document.file_name().unwrap());
+    let output = abpdf(&[&document, &document, "--output".as_ref(), &another_path]);
+    assert_eq!(output.status.code(), Some(2));
+}
+
+#[test]
+fn redline_and_json_cannot_be_one_file() {
+    let file = scratch("cli-redline-and-json");
+    let _ = fs::remove_file(&file);
+    let output = compare_revisions(&["--output".as_ref(), &file, "--json".as_ref(), &file]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("cannot hold both"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(!file.exists());
+}
+
+/// A document whose page has, among its resources, a name with an escape
+/// that is none.
+/// Writing a redline with this page has made a library panic.
+const DOCUMENT_WITH_A_BROKEN_NAME: &str = "\
+%PDF-1.7
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R  >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 4 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> /ExtGState << /G << /#nX 1 >> >> >>  >>
+endobj
+4 0 obj
+<<  /Length 36 >>
+stream
+BT /F1 12 Tf 20 250 Td (alpha) Tj ET
+endstream
+endobj
+xref
+0 5
+0000000000 65535 f\x20
+0000000009 00000 n\x20
+0000000059 00000 n\x20
+0000000116 00000 n\x20
+0000000325 00000 n\x20
+trailer
+<< /Size 5 /Root 1 0 R  >>
+startxref
+412
+%%EOF
+";
+
+#[test]
+fn document_that_a_library_panics_on_exits_like_any_other() {
+    let document = scratch("cli-broken-name.pdf");
+    fs::write(&document, DOCUMENT_WITH_A_BROKEN_NAME).unwrap();
+    let redline = scratch("cli-broken-name-redline.pdf");
+    let output = abpdf(&[
+        &document,
+        &document,
+        "--output".as_ref(),
+        &redline,
+        "--audit".as_ref(),
+    ]);
+    assert!(
+        matches!(output.status.code(), Some(0 | 2)),
+        "{:?}: {}",
+        output.status,
+        stderr(&output)
+    );
+}
+
 #[test]
 fn profile_with_a_mistake_exits_with_2() {
     let profile = scratch("cli-mistaken.toml");

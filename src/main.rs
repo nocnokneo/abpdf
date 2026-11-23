@@ -1,5 +1,6 @@
 use std::fs::{self, File};
 use std::io::{self, BufWriter};
+use std::panic;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -45,7 +46,13 @@ struct Arguments {
 }
 
 fn main() -> ExitCode {
-    match run(&Arguments::parse()) {
+    let arguments = Arguments::parse();
+    // A panic is a failed comparison as well, so that the exit status is
+    // always one of the three.
+    let outcome = panic::catch_unwind(|| run(&arguments)).unwrap_or_else(|_| {
+        Err("the comparison broke off with the error above, which abpdf does not expect".into())
+    });
+    match outcome {
         Ok(false) => ExitCode::SUCCESS,
         Ok(true) => ExitCode::from(1),
         Err(message) => {
@@ -58,6 +65,7 @@ fn main() -> ExitCode {
 /// Compares the documents and writes what was asked for.
 /// Returns whether the documents differ.
 fn run(arguments: &Arguments) -> Result<bool, String> {
+    check_files_to_write(arguments)?;
     let profile = match &arguments.profile {
         Some(path) => Profile::load(path).map_err(|error| in_file(path, error))?,
         None => Profile::default(),
@@ -101,6 +109,51 @@ fn run(arguments: &Arguments) -> Result<bool, String> {
         result => result.map_err(|error| error.to_string())?,
     }
     Ok(!comparison.changes.is_empty())
+}
+
+/// Fails if a file to write is one that the comparison would destroy by
+/// writing it: a document to compare, or the other file to write.
+fn check_files_to_write(arguments: &Arguments) -> Result<(), String> {
+    let documents = [&arguments.old, &arguments.new];
+    let files_to_write = [&arguments.output, &arguments.json];
+    let files_to_write: Vec<&PathBuf> = files_to_write.into_iter().flatten().collect();
+    for file in &files_to_write {
+        let is_document = |document: &&PathBuf| lead_to_one_file(document, file);
+        if documents.iter().any(is_document) {
+            return Err(in_file(
+                file,
+                "is a document to compare, and would be replaced",
+            ));
+        }
+    }
+    match files_to_write[..] {
+        [redline, json] if lead_to_one_file(redline, json) => {
+            Err(in_file(json, "cannot hold both the redline and the JSON"))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Whether two paths lead to one file, be it there yet or not.
+fn lead_to_one_file(first: &Path, second: &Path) -> bool {
+    match (destination(first), destination(second)) {
+        (Some(first), Some(second)) => first == second,
+        // A path that leads nowhere fails where it is read or written.
+        _ => false,
+    }
+}
+
+/// Where a path leads once its links and its steps up are followed.
+/// `None` if not even its directory is there.
+fn destination(path: &Path) -> Option<PathBuf> {
+    if let Ok(file) = fs::canonicalize(path) {
+        return Some(file);
+    }
+    let directory = match path.parent() {
+        Some(directory) if !directory.as_os_str().is_empty() => directory,
+        _ => Path::new("."),
+    };
+    Some(fs::canonicalize(directory).ok()?.join(path.file_name()?))
 }
 
 /// The bytes of a PDF and the flow of its text.
