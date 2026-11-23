@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>abpdf</title>
+  <g fill="#fff" stroke="#5E6673" stroke-width="16">
+    <rect x="24" y="56" width="80" height="144" rx="8"/>
+    <rect x="152" y="56" width="80" height="144" rx="8"/>
+  </g>
+  <g fill="#B3B9C2">
+    <rect x="44" y="80" width="40" height="14" rx="3"/>
+    <rect x="44" y="102" width="28" height="14" rx="3"/>
+    <rect x="172" y="140" width="40" height="14" rx="3"/>
+    <rect x="172" y="164" width="28" height="14" rx="3"/>
+  </g>
+  <path d="M92 128 C128 128 128 88 164 88 V120 C128 120 128 160 92 160 Z" fill="#8C59CC"/>
+  <rect x="40" y="128" width="56" height="32" rx="4" fill="#D92626"/>
+  <rect x="160" y="88" width="56" height="32" rx="4" fill="#1A9933"/>
+</svg>
