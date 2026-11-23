@@ -18,8 +18,6 @@ source:
 build:
   number: 0
   script:
-    # The licenses of the crates that are built into the program.
-    - cargo-bundle-licenses --format yaml --output THIRDPARTY.yml
     - if: unix
       then: cargo install --locked --profile dist --no-track --root "$PREFIX" --path .
     - if: win
@@ -30,7 +28,6 @@ requirements:
     - ${{ compiler('rust') }}
     # Rust links with the linker of the C compiler.
     - ${{ compiler('c') }}
-    - cargo-bundle-licenses
 
 tests:
   - script:

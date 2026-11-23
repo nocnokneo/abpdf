@@ -2,6 +2,11 @@
 
 lockfile_version = 3
 
+[[tools."cargo:cargo-bundle-licenses"]]
+version = "5.0.0"
+backend = "cargo:cargo-bundle-licenses"
+specifiers = ["5.0.0"]
+
 [[tools.rust]]
 version = "1.99.1"
 backend = "core:rust"

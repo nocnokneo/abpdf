@@ -39,6 +39,13 @@ run = [
   "typst compile --no-pdf-tags --input revision=new tests/corpus/figures.typ tests/corpus/figures-new-untagged.pdf",
 ]
 
+[tasks.licenses]
+description = "Write the licenses of the crates that abpdf is built with into THIRDPARTY.yml"
+tools = { "cargo:cargo-bundle-licenses" = "5.0.0" }
+# A text that the tool does not find in a crate is taken from THIRDPARTY.yml
+# as it is; where it has none either, the tool writes NOT FOUND.
+run = "cargo bundle-licenses --format yaml --previous THIRDPARTY.yml --output THIRDPARTY.yml"
+
 [tasks.manual]
 description = "Build both revisions of the synthetic manual, a few hundred pages each, into target/corpus"
 run = [
