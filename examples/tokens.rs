@@ -10,12 +10,11 @@ use std::{env, fs};
 use abpdf::BySide;
 use abpdf::filter::Filters;
 use abpdf::flow::{self, Gap, RawFlow};
-use abpdf::reader::pdfium::PdfiumReader;
+use abpdf::reader::Document;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let path = env::args().nth(1).ok_or("usage: tokens DOCUMENT.pdf")?;
-    let reader = PdfiumReader::open(Arc::new(fs::read(path)?))?;
-    let raw = RawFlow::read(&reader)?;
+    let raw = RawFlow::read(&Document::open(Arc::new(fs::read(path)?))?);
     let flows = BySide {
         old: raw.clone(),
         new: raw,

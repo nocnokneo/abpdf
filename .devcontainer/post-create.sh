@@ -12,7 +12,7 @@ quiet_mise() {
     CI=1 mise "$@"
 }
 
-# The toolchain that mise.toml pins: Rust, Typst and PDFium.
+# The toolchain that mise.toml pins: Rust and Typst.
 mise trust --quiet
 quiet_mise install
 

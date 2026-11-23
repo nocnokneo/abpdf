@@ -1,16 +1,14 @@
 //! Transformations of the space that a page is drawn in.
 
-use pdfium_render::prelude::FS_MATRIX;
-
 /// An affine transformation, as the six numbers of a PDF matrix.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Matrix {
-    a: f64,
-    b: f64,
-    c: f64,
-    d: f64,
-    e: f64,
-    f: f64,
+    pub a: f64,
+    pub b: f64,
+    pub c: f64,
+    pub d: f64,
+    pub e: f64,
+    pub f: f64,
 }
 
 impl Matrix {
@@ -41,18 +39,18 @@ impl Matrix {
             self.b * x + self.d * y + self.f,
         )
     }
+
+    /// Where a step of (`x`, `y`) leads after the transformation, which
+    /// does not depend on where the step starts.
+    pub fn apply_to_step(&self, x: f64, y: f64) -> (f64, f64) {
+        (self.a * x + self.c * y, self.b * x + self.d * y)
+    }
 }
 
-impl From<FS_MATRIX> for Matrix {
-    fn from(matrix: FS_MATRIX) -> Self {
-        Self {
-            a: matrix.a.into(),
-            b: matrix.b.into(),
-            c: matrix.c.into(),
-            d: matrix.d.into(),
-            e: matrix.e.into(),
-            f: matrix.f.into(),
-        }
+/// From the six numbers in the order in which a PDF writes them.
+impl From<[f64; 6]> for Matrix {
+    fn from([a, b, c, d, e, f]: [f64; 6]) -> Self {
+        Self { a, b, c, d, e, f }
     }
 }
 

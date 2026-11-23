@@ -20,7 +20,7 @@ use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfkc_quick};
 use crate::BySide;
 use crate::filter::Filters;
 use crate::geometry::{Rect, Size};
-use crate::reader::{ReadError, Reader, Style};
+use crate::reader::{Document, Style};
 
 pub use self::builder::FlowBuilder;
 pub use self::figure::{FIGURE_TEXT, Figure};
@@ -72,12 +72,12 @@ pub struct RawFlow {
 
 impl RawFlow {
     /// Reads every page of a document.
-    pub fn read(reader: &dyn Reader) -> Result<RawFlow, ReadError> {
+    pub fn read(document: &Document) -> RawFlow {
         let mut builder = FlowBuilder::default();
-        for page_index in 0..reader.page_count() {
-            builder.add_page(&reader.read_page(page_index)?);
+        for page in document.pages() {
+            builder.add_page(&page);
         }
-        Ok(builder.finish())
+        builder.finish()
     }
 }
 

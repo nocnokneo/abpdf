@@ -9,7 +9,7 @@ use abpdf::BySide;
 use abpdf::change::Comparison;
 use abpdf::filter::Filters;
 use abpdf::flow::{self, Flow, RawFlow, Token};
-use abpdf::reader::pdfium::PdfiumReader;
+use abpdf::reader::Document;
 use abpdf::redline::{self, Redline};
 
 /// How many changes the edits of `tests/corpus/revisions.typ` have to be
@@ -32,8 +32,7 @@ pub fn corpus(file_name: &str) -> Arc<Vec<u8>> {
 
 /// The flow of a PDF as it is read.
 pub fn raw_flow_of(pdf: Arc<Vec<u8>>) -> RawFlow {
-    let reader = PdfiumReader::open(pdf).expect("the PDF opens");
-    RawFlow::read(&reader).expect("the PDF reads")
+    RawFlow::read(&Document::open(pdf).expect("the PDF opens"))
 }
 
 /// The flow of a PDF as a comparison with itself sees it.

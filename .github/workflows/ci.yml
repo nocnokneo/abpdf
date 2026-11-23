@@ -16,7 +16,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
-      # Installs the tools that mise.toml pins, PDFium among them.
+      # Installs the tools that mise.toml pins.
       - uses: jdx/mise-action@v5
       - run: mise run check
 

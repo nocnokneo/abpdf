@@ -60,6 +60,14 @@ Text that was left out has an outline in a color that tells why, which the summa
 
 abpdf compares words and punctuation marks, and ignores how the text is broken into lines and pages.
 
+A PDF says where each glyph stands and not where a word ends, so abpdf tells words by the places of their glyphs:
+
+- A gap on a line is between two words.
+- Text that is raised or lowered on its line is a word of its own: an exponent, an index, the mark of a footnote.
+
+The text is read in the order in which a page draws it, which for nearly every producer is the order in which it is read.
+Everything that a page draws is read, also what it then hides: text that is clipped away, painted over or in a layer that is switched off.
+
 Text that the producer of the PDF marked as an artifact is not compared.
 In a tagged PDF from Typst that covers headers, footers, the leaders of the table of contents, table headers that are repeated after a page break, and text in `pdf.artifact`.
 
@@ -172,16 +180,13 @@ ignore_patterns = [
 
 ## Development
 
-[mise](https://mise.jdx.dev) installs the toolchain that `mise.toml` pins: Rust, Typst and the PDFium library.
+[mise](https://mise.jdx.dev) installs the toolchain that `mise.toml` pins: Rust and Typst.
 
     mise install
     mise run check
 
 `mise run check` is what CI runs.
 The dev container in `.devcontainer` has the same toolchain.
-
-abpdf loads PDFium at run time, from the path in `ABPDF_PDFIUM_LIBRARY`.
-mise sets that variable for what it runs, including `cargo`, so start a built binary with `cargo run` or `mise exec`.
 
 The tests read the PDFs in `tests/corpus`, which are built from the Typst sources next to them.
 After changing a source, rebuild them with `mise run corpus`.

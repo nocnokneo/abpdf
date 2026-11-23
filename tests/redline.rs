@@ -5,8 +5,7 @@ mod common;
 use std::sync::Arc;
 
 use abpdf::geometry::{Rect, Size};
-use abpdf::reader::Reader;
-use abpdf::reader::pdfium::PdfiumReader;
+use abpdf::reader::Document;
 use abpdf::redline::{
     self, Connector, Mark, MarkStyle, Redline, Rgb, Sheet, SheetLayout, SheetPage, Span, WriteError,
 };
@@ -236,7 +235,7 @@ fn quarter_turn_shows_the_page_on_its_side() {
 #[test]
 fn text_of_embedded_pages_stays_text() {
     let pdf = corpus("reading-tagged.pdf");
-    let page_count = PdfiumReader::open(pdf.clone())
+    let page_count = Document::open(pdf.clone())
         .expect("the PDF opens")
         .page_count();
     let redline = Redline {

@@ -2,39 +2,6 @@
 
 lockfile_version = 3
 
-[[tools."http:pdfium"]]
-version = "8125"
-backend = "http:pdfium"
-specifiers = ["8125"]
-
-[tools."http:pdfium"."platforms.linux-arm64"]
-checksum = "sha256:8b8818f2ec57d1b213d952ca6d7f0ffeca9d0110487d0e20ad83ba918bc92efa"
-url = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/8125/pdfium-linux-arm64.tgz"
-
-[tools."http:pdfium"."platforms.linux-arm64-musl"]
-checksum = "sha256:8b8818f2ec57d1b213d952ca6d7f0ffeca9d0110487d0e20ad83ba918bc92efa"
-url = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/8125/pdfium-linux-arm64.tgz"
-
-[tools."http:pdfium"."platforms.linux-x64"]
-checksum = "blake3:31c5aff43b6801b83a323412120b5bdbfb687e1e976d8038fa83ebb741eebcfe"
-url = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/8125/pdfium-linux-x64.tgz"
-
-[tools."http:pdfium"."platforms.linux-x64-musl"]
-checksum = "sha256:e1c3ce6e270cb5e0c20816b379ad9f2c1309972697c505f508de92bf5e7d6659"
-url = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/8125/pdfium-linux-x64.tgz"
-
-[tools."http:pdfium"."platforms.macos-arm64"]
-checksum = "sha256:4939bd935ac83ddc09a3a4f038bc43a19cea1660316a3667f26cb07a070e139d"
-url = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/8125/pdfium-mac-arm64.tgz"
-
-[tools."http:pdfium"."platforms.macos-x64"]
-checksum = "sha256:8a5193535b80c7215d8932f6647ae5097465b6dba2811602c21e120c2af112b0"
-url = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/8125/pdfium-mac-x64.tgz"
-
-[tools."http:pdfium"."platforms.windows-x64"]
-checksum = "sha256:9a964261760cff52570aabf038ab346d3a5034dd8b30d0d5fe8861235d356b8b"
-url = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/8125/pdfium-win-x64.tgz"
-
 [[tools.rust]]
 version = "1.99.1"
 backend = "core:rust"
