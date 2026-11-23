@@ -1,7 +1,7 @@
 # Existing open-source tools for redline PDFs: gap analysis
 
 Research date: 2026-11-12.
-Scope: can an existing FOSS tool replace i-net PDFC for release redlines of our Typst-generated controlled documents (largest: ~650-page SDD)?
+Scope: can an existing FOSS tool write the redline between two releases of a long Typst-generated document (about 650 pages), as the commercial i-net PDFC does?
 Method: repository metadata via the GitHub, GitLab, PyPI and crates.io APIs, reading READMEs and the comparison source code of the serious candidates, vendor pages for the commercial reference tools.
 No candidate was executed in this session, so all performance and output-quality statements are either quoted claims or code-reading estimates and are labelled as such.
 "Unverified" marks anything not confirmed from a primary source.
@@ -9,13 +9,13 @@ No candidate was executed in this session, so all performance and output-quality
 ## Verdict
 
 **None of the existing tools is close enough to adopt as-is.**
-Every candidate fails at least two hard requirements for our documents, most often header/footer noise, missing regex filters, and unproven scale.
+Every candidate fails at least two hard requirements for such documents, most often header/footer noise, missing regex filters, and unproven scale.
 
 - **Closest: redlatex** (MIT, Python).
   It has the right core architecture: continuous word diff over the whole document with near-linear anchoring, vector side-by-side spreads, and figure change detection.
   It lacks header/footer region exclusion, regex filters, style comparison, "only changed pages", connectors and banners.
   Its core is one ~26 KB module by one author, 4 weeks old, with no external contributors yet.
-  Contributing upstream is possible, since the project invites pull requests and asks for an issue first on large changes, but nearly all our features would be new.
+  Contributing upstream is possible, since the project invites pull requests and asks for an issue first on large changes, but nearly all the features that are required would be new.
   In practice the choice is between a **hard fork of redlatex** and a **new tool that reuses its MIT-licensed algorithm**, and those cost about the same.
 - **Best-maintained host: PDF4QT** (MIT, C++/Qt, active, responsive maintainer).
   It already has a `PdfTool diff` CLI and continuous text comparison within changed page ranges.
@@ -31,7 +31,7 @@ Consider pypdfium2 (Apache-2.0/BSD) plus pypdf (BSD) instead of PyMuPDF (AGPL-3.
 
 ## Requirement keys used in the tables
 
-| Key | Requirement (from the brief) |
+| Key | Requirement |
 | --- | --- |
 | R1 | Continuous text-flow comparison; reflow onto later pages does not mark those pages changed |
 | R2 | Side-by-side landscape output PDF, original vector pages preserved |
@@ -87,15 +87,15 @@ Legend: **Yes** = meets it, **Part** = partially, **No** = missing, **?** = unkn
 - [1d] Page pairing (`pair_pages`): each new page is paired with the old page sharing the most matched words; the loop appends a spread for every new page, so unchanged pages are not omitted (same file).
   A cover page lists removed/added word counts per section using PDF bookmarks, which Typst emits.
 - [1e] Header/footer handling: `extract` drops only lines that lie below 86% of page height and consist entirely of digits (same file).
-  Our header line ("Page 24 of 646", document number, revision) would therefore enter the diff stream on every page and produce noise.
+  A header line such as "Page 24 of 646" would therefore enter the diff stream on every page and produce noise.
 - [1f] License MIT (https://github.com/stormaref/redlatex/blob/main/LICENSE); but see [License trap](#license-trap-pymupdf).
 - [1g] Maintenance: 18 commits, single contributor, 9 issues/PRs, all from Dependabot (GitHub API, 2026-11-12).
   CONTRIBUTING invites PRs and asks for "an issue first for anything large" (https://github.com/stormaref/redlatex/blob/main/CONTRIBUTING.md).
 - LaTeX-specific parts (latexmk build, `\appendix` lettering, web app) are separable; `--old-pdf/--new-pdf` needs neither git nor LaTeX (README).
 - Code quality: compact, dense functional style with short names; readable but untyped and lightly tested (`tests/test_diff.py` is 3 KB).
-- Work to reach our bar: header/footer bands, regex token filters, only-changed-pages plus "no differences" banners, style comparison, connector lines, page-size/orientation options, scale testing on 650 pages.
+- Work to meet the requirements: header/footer bands, regex token filters, only-changed-pages plus "no differences" banners, style comparison, connector lines, page-size/orientation options, scale testing on 650 pages.
 
-### 2. PDF4QT (Pdf4QtDiff GUI + `PdfTool diff` CLI): good host, wrong algorithm for our scale
+### 2. PDF4QT (Pdf4QtDiff GUI + `PdfTool diff` CLI): good host, wrong algorithm for this scale
 
 - Repository: https://github.com/JakubMelka/PDF4QT; release v1.7.0.0 published 2026-11-08 with `PDF4QT-Windows-1.7.0.0.zip`, MSI, MSIX, AppImage and Flatpak (https://github.com/JakubMelka/PDF4QT/releases/tag/v1.7.0.0).
 - [2f] License: "As of April 27, 2025, the project has been relicensed under the MIT License" (README, https://github.com/JakubMelka/PDF4QT#readme); depends on Qt (LGPL) and others.
@@ -103,7 +103,7 @@ Legend: **Yes** = meets it, **Part** = partially, **No** = missing, **?** = unkn
   - Pages are matched with an LCS over page content hashes (`performPageMatching`).
   - For each contiguous run of non-identical pages, the text flows of all pages in the run are concatenated and diffed (`performCompare`), so reflow inside a run is handled as continuous text.
   - Vector graphics, images and shadings are compared per matched page pair by geometry, so content that only moved position is likely to be flagged (code-reading inference, unverified).
-  - Because our header contains "Page N of M", any page-count change makes every page hash differ, so the whole document becomes one run.
+  - If a header contains "Page N of M", any page-count change makes every page hash differ, so the whole document becomes one run.
 - [2d] Text diff algorithm: `PDFAlgorithmLongestCommonSubsequence` in `pdfalgorithmlcs.h` fills a full `m_size1 * m_size2` `std::vector<bool>` backtrack matrix (https://github.com/JakubMelka/PDF4QT/blob/master/Pdf4QtLibCore/sources/pdfalgorithmlcs.h).
   - My estimate: 650 pages × ~400 words ≈ 260 k words per side gives ≈ 6.8 × 10¹⁰ cells, ≈ 8.5 GB of bits plus as many string comparisons; character mode is worse.
   - Consistent with issue #132 "PDF diff hangs" on two 1 k-page PDFs, closed without reproduction (https://github.com/JakubMelka/PDF4QT/issues/132).
@@ -115,7 +115,7 @@ Legend: **Yes** = meets it, **Part** = partially, **No** = missing, **?** = unkn
 - [2g] Maintenance: 1521 commits, 1476 by Jakub Melka; outside PRs merged in 2025–2026 are mostly translations and build fixes (GitHub API).
   The maintainer fixed feature request #278 (overlay scaling in Diff) and #182 (Diff CLI arguments) (https://github.com/JakubMelka/PDF4QT/issues/278, https://github.com/JakubMelka/PDF4QT/issues/182).
   README: "Contributions are welcome!" with no CLA required.
-- Work to reach our bar: replace the LCS with a linear-space/anchored diff, add header/footer and regex filters, add a style comparison, add side-by-side PDF composition and expose it in `PdfTool diff`, plus make graphics comparison reflow-tolerant.
+- Work to meet the requirements: replace the LCS with a linear-space/anchored diff, add header/footer and regex filters, add a style comparison, add side-by-side PDF composition and expose it in `PdfTool diff`, plus make graphics comparison reflow-tolerant.
   That is a large C++/Qt contribution into a library with one maintainer.
 
 ### 3. kogo: richest feature list, but AGPL and page-pair fallback
@@ -125,7 +125,7 @@ Legend: **Yes** = meets it, **Part** = partially, **No** = missing, **?** = unkn
   - Word-level text diff, page alignment tolerant to inserted/removed pages, pixel diff of figures with text areas masked, style-only change detection (bold, italic, font size), annotation diff.
   - Outputs `old-highlighted.pdf`, `new-highlighted.pdf`, `side-by-side.pdf`, `result.json`.
 - [3a] `_document_text_differences` first matches identical lines, then runs `difflib.SequenceMatcher` on the remaining words of the whole document, but if `len(old_remaining) * len(new_remaining) > 60_000_000` it falls back to per-aligned-page-pair diffs (https://github.com/ta-061/kogo/blob/main/src/kogo/engine/text_diff.py).
-  Whether a 650-page SDD revision stays under that threshold depends on how much text survives exact-line matching (unverified).
+  Whether a revision of a 650-page document stays under that threshold depends on how much text survives exact-line matching (unverified).
 - [3c] `--max-pages` defaults to 200 and is capped at 2000; `--dpi` 96–180 (https://github.com/ta-061/kogo/blob/main/src/kogo/cli.py).
 - [3d] Single author, 34 commits, no human-filed issues (GitHub API).
 - Pixel diff runs per aligned page pair (`compare.py`), so reflowed figures are likely to be flagged (inference, unverified).
@@ -143,7 +143,7 @@ Legend: **Yes** = meets it, **Part** = partially, **No** = missing, **?** = unkn
 
 - Repository https://github.com/JoshData/pdf-diff (default branch `primary`); PyPI `pdf-diff` 0.9.3 (2026-02-08), CC0-1.0 [5b] (https://pypi.org/pypi/pdf-diff/json).
 - [5a] README: compares the text layers of the two documents, outputs changed-text bounding boxes as JSON, and "Rasterizes the changed pages … to a PNG"; relies on poppler `pdftotext`; uses `fast_diff_match_patch` (https://github.com/JoshData/pdf-diff#readme).
-- Useful mainly as a proof that whole-document text diffing with position mapping works; its output format is far from our bar.
+- Useful mainly as a proof that whole-document text diffing with position mapping works; its output format is far from the requirements.
 
 ## Other candidates surveyed and rejected
 
@@ -212,8 +212,8 @@ Converting a 650-page Typst PDF to DOCX/HTML is itself lossy for tables, diagram
 
 - All Python candidates above (redlatex, kogo, pdf-content-diff, pdfdelta, PDF-Diff-Viewer) depend on PyMuPDF, which is "AGPL-3.0-or-commercial" (kogo README credits; https://github.com/ta-061/kogo#license).
 - redlatex and pdfdelta are labelled MIT, but anything distributed with PyMuPDF is effectively bound by AGPL-3.0 terms.
-- For an internal CI tool this is acceptable (copyleft is fine for a standalone CLI per the brief), but record it.
-- A permissive rewrite could use pypdfium2 for word boxes and rendering plus pypdf for placing original pages as Form XObjects (unverified that pypdf's transformed-page merge preserves everything we need).
+- For a standalone command line tool that runs in CI, copyleft is acceptable, but record it.
+- A permissive rewrite could use pypdfium2 for word boxes and rendering plus pypdf for placing original pages as Form XObjects (unverified that pypdf's transformed-page merge preserves everything that is needed).
 
 ## Commercial reference bar (not candidates)
 
