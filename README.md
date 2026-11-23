@@ -226,6 +226,7 @@ The tag of a version builds its release:
 3. Commit both, tag the commit `v1.2.3` and push the tag.
 
 The [release workflow](.github/workflows/release.yml) then builds abpdf for Linux, Windows and macOS, as archives and as conda packages, and publishes them as a GitHub release whose notes are what the changelog says about the version.
+It publishes nothing unless the tagged commit is on `main` and passes the checks of CI, which it runs again.
 
 The conda packages are built from [recipe/recipe.yaml](recipe/recipe.yaml).
 The workflow uploads them to a channel on [prefix.dev](https://prefix.dev) if the repository variable `PREFIX_CHANNEL` names one, and if that channel has the workflow as a trusted publisher.

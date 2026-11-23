@@ -1,0 +1,10 @@
+# Keeps the actions that the workflows pin by commit up to date.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # A release gets a week to be found out before it is proposed.
+    cooldown:
+      default-days: 7
