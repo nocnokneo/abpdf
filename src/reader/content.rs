@@ -37,14 +37,28 @@ pub(super) use self::path::{Segment, SegmentKind};
 use self::state::{GraphicsState, Paint};
 pub(super) use self::text::{Glyph, TextRun};
 use self::text::{TextPosition, TextShow};
-use super::Color;
 use super::fonts::Fonts;
 use super::matrix::Matrix;
 use super::page_space::UserSpaceBox;
+use super::{Color, PageLimit};
 
-/// Forms inside forms deeper than this are not drawn, so that a malformed
-/// PDF cannot exhaust the stack.
-const MAX_FORM_DEPTH: usize = 16;
+/// How much content a page may run, counting a form each time it is drawn,
+/// because a form that draws another form several times multiplies what
+/// the page runs with each level.
+/// Every object that a page draws takes a few bytes of content, so this
+/// also bounds the memory that the objects of a page take.
+pub(super) const MAX_CONTENT_BYTES_PER_PAGE: usize = 16 << 20;
+
+/// How deep forms may be drawn inside forms, so that a form that draws
+/// itself cannot exhaust the stack.
+pub(super) const MAX_FORM_DEPTH: usize = 16;
+
+/// How many graphics states may be saved at once, each of which is a copy.
+pub(super) const MAX_SAVED_STATE_DEPTH: usize = 1024;
+
+/// How deep marked content may be inside marked content, each level of
+/// which copies the levels around it.
+pub(super) const MAX_MARKED_CONTENT_DEPTH: usize = 64;
 
 /// Something that a page draws.
 #[derive(Clone, Debug)]
@@ -117,13 +131,24 @@ impl Shared<'_> {
     }
 }
 
-/// The objects that a page draws, in the order in which it draws them.
+/// The objects that a page draws, in the order in which it draws them, or
+/// the limit that the page goes beyond.
 /// `visible` is the part of the page that a viewer shows.
 pub(super) fn objects_of<'a>(
     page: &Page<'a>,
     shared: &Shared<'a>,
     visible: UserSpaceBox,
-) -> Vec<Object> {
+) -> Result<Vec<Object>, PageLimit> {
+    objects_within(page, shared, visible, MAX_CONTENT_BYTES_PER_PAGE)
+}
+
+/// What [`objects_of`] is, with how much content the page may run.
+fn objects_within<'a>(
+    page: &Page<'a>,
+    shared: &Shared<'a>,
+    visible: UserSpaceBox,
+    max_content_bytes: usize,
+) -> Result<Vec<Object>, PageLimit> {
     let mut interpreter = Interpreter {
         shared,
         state: GraphicsState::initial(visible),
@@ -133,8 +158,10 @@ pub(super) fn objects_of<'a>(
         path: PathBuilder::default(),
         path_is_clip: false,
         form_depth: 0,
+        content_bytes_left: max_content_bytes,
     };
-    interpreter.run(page.typed_operations(), page.resources())
+    let content = page.page_stream().unwrap_or_default();
+    interpreter.run(content, page.resources())
 }
 
 struct Interpreter<'s, 'a> {
@@ -151,22 +178,28 @@ struct Interpreter<'s, 'a> {
     path_is_clip: bool,
     /// How many forms are being drawn, one inside the other.
     form_depth: usize,
+    /// How much more content the page may run.
+    content_bytes_left: usize,
 }
 
 impl<'a> Interpreter<'_, 'a> {
-    /// Runs a content stream and returns what it draws.
+    /// Runs a content stream and returns what it draws, or stops at the
+    /// first limit that the page goes beyond.
     ///
     /// A stream cannot end what the stream around it began: it brings back
     /// no more states than it saved and ends no more marked content than
     /// it began, and what it leaves open ends with it.
-    fn run(&mut self, mut instructions: TypedIter, resources: &Resources<'a>) -> Vec<Object> {
+    fn run(&mut self, content: &[u8], resources: &Resources<'a>) -> Result<Vec<Object>, PageLimit> {
+        let content_bytes_left = self.content_bytes_left.checked_sub(content.len());
+        self.content_bytes_left = content_bytes_left.ok_or(PageLimit::ContentBytes)?;
         let own = OwnOfStream {
             saved_state_count: self.saved_states.len(),
             mark_count: self.marks.count(),
         };
         let mut objects = Vec::new();
+        let mut instructions = TypedIter::new(content);
         while let Some(instruction) = instructions.next() {
-            self.execute(instruction, resources, &own, &mut objects);
+            self.execute(instruction, resources, &own, &mut objects)?;
         }
         while self.saved_states.len() > own.saved_state_count {
             self.restore_state(&own);
@@ -176,7 +209,7 @@ impl<'a> Interpreter<'_, 'a> {
         }
         self.path = PathBuilder::default();
         self.path_is_clip = false;
-        objects
+        Ok(objects)
     }
 
     /// Executes an instruction and adds what it draws to `objects`.
@@ -186,7 +219,7 @@ impl<'a> Interpreter<'_, 'a> {
         resources: &Resources<'a>,
         own: &OwnOfStream,
         objects: &mut Vec<Object>,
-    ) {
+    ) -> Result<(), PageLimit> {
         use TypedInstruction as I;
         let (non_zero, even_odd) = (Some(FillRule::NonZero), Some(FillRule::EvenOdd));
         let drawn = match instruction {
@@ -207,9 +240,10 @@ impl<'a> Interpreter<'_, 'a> {
             I::Shading(_) => Some(Content::Shading {
                 bounds: self.state.clip,
             }),
-            I::XObject(name) => resources
-                .get_x_object(name.0)
-                .and_then(|x_object| self.draw(&x_object, resources)),
+            I::XObject(name) => match resources.get_x_object(name.0) {
+                Some(x_object) => self.draw(&x_object, resources)?,
+                None => None,
+            },
             I::InlineImage(image) => Some(Content::Image(self.image_of(image.0))),
 
             // The showing of text.
@@ -228,7 +262,7 @@ impl<'a> Interpreter<'_, 'a> {
 
             // Everything else draws nothing.
             other => {
-                self.set(other, resources, own);
+                self.set(other, resources, own)?;
                 None
             }
         };
@@ -236,6 +270,7 @@ impl<'a> Interpreter<'_, 'a> {
             marks: self.marks.clone(),
             content,
         }));
+        Ok(())
     }
 
     /// Executes an instruction that draws nothing: one that constructs a
@@ -245,12 +280,12 @@ impl<'a> Interpreter<'_, 'a> {
         instruction: TypedInstruction<'_, '_>,
         resources: &Resources<'a>,
         own: &OwnOfStream,
-    ) {
+    ) -> Result<(), PageLimit> {
         use TypedInstruction as I;
         let text = &mut self.state.text;
         match instruction {
             // The graphics state.
-            I::SaveState(_) => self.saved_states.push(self.state.clone()),
+            I::SaveState(_) => self.save_state()?,
             I::RestoreState(_) => self.restore_state(own),
             I::Transform(matrix) => {
                 let numbers = [matrix.0, matrix.1, matrix.2, matrix.3, matrix.4, matrix.5];
@@ -326,14 +361,14 @@ impl<'a> Interpreter<'_, 'a> {
             I::NextLineUsingLeading(_) => self.start_next_line(),
 
             // Marked content.
-            I::BeginMarkedContent(mark) => self.begin_marked_content(mark.0, None),
+            I::BeginMarkedContent(mark) => self.begin_marked_content(mark.0, None)?,
             I::BeginMarkedContentWithProperties(mark) => {
                 let properties = match mark.1 {
                     PdfObject::Dict(properties) => Some(properties.clone()),
                     PdfObject::Name(name) => resources.properties.get::<Dict>(name),
                     _ => None,
                 };
-                self.begin_marked_content(mark.0, properties.as_ref());
+                self.begin_marked_content(mark.0, properties.as_ref())?;
             }
             I::EndMarkedContent(_) => {
                 if self.marks.count() > own.mark_count {
@@ -343,6 +378,7 @@ impl<'a> Interpreter<'_, 'a> {
 
             other => self.set_color(other, resources),
         }
+        Ok(())
     }
 
     /// Executes an instruction that sets the color of fills or of strokes.
@@ -372,6 +408,14 @@ impl<'a> Interpreter<'_, 'a> {
             I::NonStrokeColorCmyk(color) => *fill = cmyk([color.0, color.1, color.2, color.3]),
             _ => {}
         }
+    }
+
+    fn save_state(&mut self) -> Result<(), PageLimit> {
+        if self.saved_states.len() >= MAX_SAVED_STATE_DEPTH {
+            return Err(PageLimit::SavedStateDepth);
+        }
+        self.saved_states.push(self.state.clone());
+        Ok(())
     }
 
     fn restore_state(&mut self, own: &OwnOfStream) {
@@ -443,11 +487,15 @@ impl<'a> Interpreter<'_, 'a> {
     }
 
     /// What an image or a form draws.
-    fn draw(&mut self, x_object: &Stream<'a>, resources: &Resources<'a>) -> Option<Content> {
+    fn draw(
+        &mut self,
+        x_object: &Stream<'a>,
+        resources: &Resources<'a>,
+    ) -> Result<Option<Content>, PageLimit> {
         match x_object.dict().get::<Name>("Subtype").as_deref() {
-            Some(b"Image") => Some(Content::Image(self.image_of(x_object))),
+            Some(b"Image") => Ok(Some(Content::Image(self.image_of(x_object)))),
             Some(b"Form") => self.draw_form(x_object, resources),
-            _ => None,
+            _ => Ok(None),
         }
     }
 
@@ -471,12 +519,18 @@ impl<'a> Interpreter<'_, 'a> {
     /// The objects that a form draws, as one object.
     /// `resources` are those of the stream that draws the form, which the
     /// form uses if it has none of its own.
-    fn draw_form(&mut self, form: &Stream<'a>, resources: &Resources<'a>) -> Option<Content> {
+    fn draw_form(
+        &mut self,
+        form: &Stream<'a>,
+        resources: &Resources<'a>,
+    ) -> Result<Option<Content>, PageLimit> {
         if self.form_depth >= MAX_FORM_DEPTH {
-            return None;
+            return Err(PageLimit::FormDepth);
         }
         let dictionary = form.dict();
-        let content = form.decoded_data().ok()?;
+        let Ok(content) = form.decoded_data() else {
+            return Ok(None);
+        };
         let own_resources = dictionary.get::<Dict>("Resources").map(Resources::new);
         let state_around = self.state.clone();
         if let Some(matrix) = dictionary.get::<[f64; 6]>("Matrix") {
@@ -495,13 +549,10 @@ impl<'a> Interpreter<'_, 'a> {
             self.state.clip = self.state.clip.intersection(&bounds);
         }
         self.form_depth += 1;
-        let objects = self.run(
-            TypedIter::new(&content),
-            own_resources.as_ref().unwrap_or(resources),
-        );
+        let objects = self.run(&content, own_resources.as_ref().unwrap_or(resources))?;
         self.form_depth -= 1;
         self.state = state_around;
-        Some(Content::Form(objects))
+        Ok(Some(Content::Form(objects)))
     }
 
     fn start_next_line(&mut self) {
@@ -550,9 +601,17 @@ impl<'a> Interpreter<'_, 'a> {
         }
     }
 
-    fn begin_marked_content(&mut self, tag: &Name, properties: Option<&Dict>) {
+    fn begin_marked_content(
+        &mut self,
+        tag: &Name,
+        properties: Option<&Dict>,
+    ) -> Result<(), PageLimit> {
+        if self.marks.count() >= MAX_MARKED_CONTENT_DEPTH {
+            return Err(PageLimit::MarkedContentDepth);
+        }
         let is_in_form = self.form_depth > 0;
         self.marks = self.marks.with(Mark::new(tag, properties, is_in_form));
+        Ok(())
     }
 }
 

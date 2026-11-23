@@ -32,7 +32,7 @@ pub fn corpus(file_name: &str) -> Arc<Vec<u8>> {
 
 /// The flow of a PDF as it is read.
 pub fn raw_flow_of(pdf: Arc<Vec<u8>>) -> RawFlow {
-    RawFlow::read(&Document::open(pdf).expect("the PDF opens"))
+    RawFlow::read(&Document::open(pdf).expect("the PDF opens")).expect("the pages are read")
 }
 
 /// The flow of a PDF as a comparison with itself sees it.

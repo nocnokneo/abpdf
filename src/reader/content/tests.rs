@@ -1,7 +1,9 @@
 //! What the interpreter reports of content streams.
 
+use hayro_syntax::Pdf;
+
 use super::*;
-use crate::reader::testing::{objects_drawn_by, stream};
+use crate::reader::testing::{PAGE, objects_drawn_by, page_pdf, stream};
 
 /// The advance widths of glyphs of Helvetica at a font size of 10.
 const WIDTH_OF_A: f64 = 5.56;
@@ -463,11 +465,74 @@ fn form_uses_the_resources_of_what_draws_it_unless_it_has_its_own() {
     assert_eq!(font_in_form(own_font), "Courier");
 }
 
+/// What a page draws, or the limit that it goes beyond, where the page may
+/// run as much content as given.
+fn objects_drawn_within(
+    content: &str,
+    resources: &str,
+    more_objects: &[String],
+    max_content_bytes: usize,
+) -> Result<Vec<Object>, PageLimit> {
+    let pdf = Pdf::new(page_pdf(content, resources, more_objects)).expect("the PDF opens");
+    objects_within(&pdf.pages()[0], &Shared::new(), PAGE, max_content_bytes)
+}
+
+/// What a page draws that has the given content and no other resources
+/// than its font, or the limit that it goes beyond.
+fn drawn_within_the_limits(content: &str) -> Result<Vec<Object>, PageLimit> {
+    objects_drawn_within(content, "", &[], MAX_CONTENT_BYTES_PER_PAGE)
+}
+
+/// Forms as the objects from 5 on, of which each draws the next one as
+/// often as given and the last one draws a square, and the content of the
+/// first one.
+fn forms_inside_forms(depth: usize, draw_count: usize) -> (Vec<String>, Vec<String>) {
+    let contents: Vec<String> = (0..depth)
+        .map(|index| match index + 1 < depth {
+            true => vec!["/Next Do"; draw_count].join(" "),
+            false => "0 0 1 1 re f".to_owned(),
+        })
+        .collect();
+    let forms = contents.iter().enumerate().map(|(index, content)| {
+        let next = 5 + index + 1;
+        stream(
+            &format!(
+                "/Type /XObject /Subtype /Form /BBox [0 0 50 50] \
+                 /Resources << /XObject << /Next {next} 0 R >> >>"
+            ),
+            content,
+        )
+    });
+    (forms.collect(), contents)
+}
+
 #[test]
-fn forms_inside_forms_are_drawn_down_to_a_depth() {
+fn forms_inside_forms_are_drawn_down_to_a_depth_and_fail_the_page_below_it() {
+    let draw_forms = |depth| {
+        let (forms, _) = forms_inside_forms(depth, 1);
+        let resources = "/XObject << /First 5 0 R >>";
+        objects_drawn_within("/First Do", resources, &forms, MAX_CONTENT_BYTES_PER_PAGE)
+    };
+    let objects = draw_forms(MAX_FORM_DEPTH).expect("the forms are drawn");
+    let mut depth = 0;
+    let mut drawn = &objects[0];
+    while let Content::Form(parts) = &drawn.content {
+        drawn = &parts[0];
+        depth += 1;
+    }
+    assert_eq!(depth, MAX_FORM_DEPTH);
+    assert_eq!(
+        draw_forms(MAX_FORM_DEPTH + 1).unwrap_err(),
+        PageLimit::FormDepth
+    );
+}
+
+#[test]
+fn forms_that_draw_each_other_in_a_circle_fail_the_page() {
     // Each form draws a square and the form after it, and the last one
     // draws the first.
     let form_count = MAX_FORM_DEPTH + 4;
+    let content = "0 0 1 1 re f /Next Do";
     let forms: Vec<String> = (0..form_count)
         .map(|index| {
             let next = 5 + (index + 1) % form_count;
@@ -476,18 +541,74 @@ fn forms_inside_forms_are_drawn_down_to_a_depth() {
                     "/Type /XObject /Subtype /Form /BBox [0 0 50 50] \
                      /Resources << /XObject << /Next {next} 0 R >> >>"
                 ),
-                "0 0 1 1 re f /Next Do",
+                content,
             )
         })
         .collect();
-    let objects = objects_drawn_by("/First Do", "/XObject << /First 5 0 R >>", &forms);
-    let mut depth = 1;
-    let mut form = &objects[0];
-    while let [_, inner] = parts_of(form) {
-        form = inner;
-        depth += 1;
-    }
-    assert_eq!(depth, MAX_FORM_DEPTH);
+    // Room for the forms to be drawn twice as deep as they may be, so that
+    // the depth is what stops them.
+    let max_content_bytes = 2 * MAX_FORM_DEPTH * content.len() + "/First Do".len();
+    let resources = "/XObject << /First 5 0 R >>";
+    let drawn = objects_drawn_within("/First Do", resources, &forms, max_content_bytes);
+    assert_eq!(drawn.unwrap_err(), PageLimit::FormDepth);
+}
+
+#[test]
+fn content_of_a_form_counts_each_time_that_the_form_is_drawn() {
+    // 4 to the power of 5 squares, drawn by forms that each draw the next
+    // form four times.
+    let (forms, contents) = forms_inside_forms(6, 4);
+    let page_content = "/First Do";
+    let content_bytes: usize = page_content.len()
+        + (contents.iter().enumerate())
+            .map(|(depth, content)| 4_usize.pow(depth as u32) * content.len())
+            .sum::<usize>();
+    let resources = "/XObject << /First 5 0 R >>";
+    let draw_within = |max_content_bytes| {
+        objects_drawn_within(page_content, resources, &forms, max_content_bytes)
+    };
+    assert!(draw_within(content_bytes).is_ok());
+    assert_eq!(
+        draw_within(content_bytes - 1).unwrap_err(),
+        PageLimit::ContentBytes
+    );
+}
+
+#[test]
+fn content_of_the_page_counts_too() {
+    let content = "0 0 1 1 re f";
+    let draw_within = |max_content_bytes| objects_drawn_within(content, "", &[], max_content_bytes);
+    assert!(draw_within(content.len()).is_ok());
+    assert_eq!(
+        draw_within(content.len() - 1).unwrap_err(),
+        PageLimit::ContentBytes
+    );
+}
+
+#[test]
+fn graphics_states_saved_at_once_beyond_a_depth_fail_the_page() {
+    let saved = |count| "q ".repeat(count);
+    assert!(drawn_within_the_limits(&saved(MAX_SAVED_STATE_DEPTH)).is_ok());
+    assert_eq!(
+        drawn_within_the_limits(&saved(MAX_SAVED_STATE_DEPTH + 1)).unwrap_err(),
+        PageLimit::SavedStateDepth
+    );
+    // A state that is brought back is no longer saved.
+    let saved_and_brought_back = "q Q ".repeat(MAX_SAVED_STATE_DEPTH + 1);
+    assert!(drawn_within_the_limits(&saved_and_brought_back).is_ok());
+}
+
+#[test]
+fn marked_content_beyond_a_depth_fails_the_page() {
+    let marked = |depth| "/Span BMC ".repeat(depth);
+    assert!(drawn_within_the_limits(&marked(MAX_MARKED_CONTENT_DEPTH)).is_ok());
+    assert_eq!(
+        drawn_within_the_limits(&marked(MAX_MARKED_CONTENT_DEPTH + 1)).unwrap_err(),
+        PageLimit::MarkedContentDepth
+    );
+    // Marked content that ends is no longer around what follows it.
+    let marked_and_ended = "/Span BMC EMC ".repeat(MAX_MARKED_CONTENT_DEPTH + 1);
+    assert!(drawn_within_the_limits(&marked_and_ended).is_ok());
 }
 
 /// The marked content identifiers of the objects that a content stream

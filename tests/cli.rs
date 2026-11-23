@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::Arc;
 
+use pdf_writer::{Pdf, Ref};
 use serde_json::Value;
 
 use common::{REVISIONS_CHANGE_COUNT, corpus_path as corpus, page_texts};
@@ -189,6 +190,45 @@ fn file_that_is_not_a_pdf_exits_with_2() {
         "{}",
         stderr(&output)
     );
+}
+
+/// A document of two pages, of which the second saves far more graphics
+/// states at once than any honest page does.
+fn document_with_a_hostile_second_page() -> Vec<u8> {
+    let [catalog_id, page_tree_id, content_id] = [1, 2, 3].map(Ref::new);
+    let page_ids = [4, 5].map(Ref::new);
+    let mut pdf = Pdf::new();
+    pdf.catalog(catalog_id).pages(page_tree_id);
+    pdf.pages(page_tree_id).kids(page_ids).count(2);
+    for page_id in page_ids {
+        let mut page = pdf.page(page_id);
+        page.parent(page_tree_id)
+            .media_box(pdf_writer::Rect::new(0.0, 0.0, 200.0, 300.0));
+        if page_id == page_ids[1] {
+            page.contents(content_id);
+        }
+    }
+    pdf.stream(content_id, "q ".repeat(100_000).as_bytes());
+    pdf.finish()
+}
+
+#[test]
+fn page_beyond_what_abpdf_reads_exits_with_2_and_is_named() {
+    let (pdf, hostile) = (
+        corpus("revisions-old-tagged.pdf"),
+        scratch("cli-hostile.pdf"),
+    );
+    fs::write(&hostile, document_with_a_hostile_second_page()).unwrap();
+    let output = abpdf(&[&pdf, &hostile]);
+    assert_eq!(output.status.code(), Some(2));
+    let expected = "cli-hostile.pdf: page 2 goes beyond what abpdf reads of a page: more than";
+    assert!(stderr(&output).contains(expected), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("graphics states saved at once"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(stdout(&output), "");
 }
 
 /// A copy of a document of the corpus that a test may lose.
