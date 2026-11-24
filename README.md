@@ -243,6 +243,7 @@ It publishes nothing unless the tagged commit is on `main` and passes the checks
 
 The conda packages are built from [recipe/recipe.yaml](recipe/recipe.yaml).
 The workflow uploads them to a channel on [prefix.dev](https://prefix.dev) if the repository variable `PREFIX_CHANNEL` names one, and if that channel has the workflow as a trusted publisher.
+The trusted publisher names the GitHub environment `release`, which only tags that start with `v` can deploy to, so that nothing else can upload.
 The variable holds the name of the channel as its address has it after `https://prefix.dev/`, and not the address.
 
 ## License

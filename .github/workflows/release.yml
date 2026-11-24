@@ -182,11 +182,12 @@ jobs:
   channel:
     name: conda channel
     # The repository variable PREFIX_CHANNEL names a channel on prefix.dev
-    # to publish the conda packages on, which has this workflow as a
-    # trusted publisher.
+    # to publish the conda packages on, which has this workflow in the
+    # environment release as a trusted publisher.
     if: github.ref_type == 'tag' && vars.PREFIX_CHANNEL != ''
     needs: [conda, release]
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: read
       id-token: write
