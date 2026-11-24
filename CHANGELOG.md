@@ -5,6 +5,8 @@ The format is that of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), 
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-24
+
 The first release.
 
 ### Added
