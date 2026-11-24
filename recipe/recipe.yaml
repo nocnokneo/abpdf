@@ -18,8 +18,6 @@ source:
 build:
   number: 0
   script:
-    # The licenses of the crates that are built into the program.
-    - cargo-bundle-licenses --format yaml --output THIRDPARTY.yml
     - if: unix
       then: cargo install --locked --profile dist --no-track --root "$PREFIX" --path .
     - if: win
@@ -30,7 +28,6 @@ requirements:
     - ${{ compiler('rust') }}
     # Rust links with the linker of the C compiler.
     - ${{ compiler('c') }}
-    - cargo-bundle-licenses
 
 tests:
   - script:
@@ -42,5 +39,7 @@ about:
   license: MIT
   license_file:
     - LICENSE
+    - NOTICES
+    - assets/fonts/DejaVuSans-LICENSE.txt
     - THIRDPARTY.yml
   summary: Compare two PDFs and get a side-by-side redline PDF

@@ -217,6 +217,10 @@ The dev container in `.devcontainer` has the same toolchain.
 The tests read the PDFs in `tests/corpus`, which are built from the Typst sources next to them.
 After changing a source, rebuild them with `mise run corpus`.
 
+`THIRDPARTY.yml` holds the licenses of the crates that abpdf is built with, and CI checks that it is up to date.
+After changing the dependencies, rewrite it with `mise run licenses`.
+Where a crate comes without the text of its license, the task writes `NOT FOUND`: put the text from the crate's repository in its place.
+
 To run the comparison on documents that cannot be checked in, see [tests/private_corpus.rs](tests/private_corpus.rs).
 `mise run manual` builds a synthetic manual of about 300 pages in two revisions, to measure on.
 
@@ -244,4 +248,9 @@ The variable holds the name of the channel as its address has it after `https://
 
 [MIT](LICENSE)
 
-abpdf embeds the DejaVu Sans font, which has [its own license](assets/fonts/DejaVuSans-LICENSE.txt).
+abpdf embeds data that has licenses of its own:
+
+- the DejaVu Sans font, under [its license](assets/fonts/DejaVuSans-LICENSE.txt)
+- the standard fonts of PDF, the CMaps of Adobe and the Adobe Glyph List, which crates that abpdf is built with bring along, under the licenses in [NOTICES](NOTICES)
+
+The archives and the conda packages of a release carry these licenses, and those of the crates, which [THIRDPARTY.yml](THIRDPARTY.yml) holds.

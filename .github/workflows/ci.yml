@@ -46,3 +46,18 @@ jobs:
       - run: mise run corpus
       # The PDFs that are checked in have to be what their sources build to.
       - run: git diff --exit-code -- tests/corpus
+
+  licenses:
+    name: licenses of the crates are complete and up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+        with:
+          version: ${{ env.MISE_VERSION }}
+      - run: mise run licenses
+      # THIRDPARTY.yml has to be what the task writes, with every text found.
+      - run: git diff --exit-code -- THIRDPARTY.yml
+      - run: "! grep --line-number 'NOT FOUND' THIRDPARTY.yml"
