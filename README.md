@@ -236,6 +236,7 @@ The tag of a version builds its release:
 1. Set the version in `Cargo.toml`, and run `cargo check` so that `Cargo.lock` has it too.
 2. In `CHANGELOG.md`, put what is under `Unreleased` under a heading for the version, such as `## [1.2.3] - 2026-12-01`.
 3. Commit both, tag the commit `v1.2.3` and push the tag.
+   The workflow creates the release on GitHub, and it fails if one exists already.
 
 The [release workflow](.github/workflows/release.yml) then builds abpdf for Linux, Windows and macOS, as archives and as conda packages, and publishes them as a GitHub release whose notes are what the changelog says about the version.
 It publishes nothing unless the tagged commit is on `main` and passes the checks of CI, which it runs again.
